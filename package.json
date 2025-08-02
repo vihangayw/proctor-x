@@ -1,0 +1,57 @@
+{
+  "name": "exam-application",
+  "version": "1.0.0",
+  "description": "Electron application for online exams",
+  "author": "Your Name <your.email@example.com>",
+  "license": "ISC",
+  "homepage": "https://your-company.com/exam-app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/exam-application.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/exam-application/issues"
+   },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder build --mac --windows --linux",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.yourcompany.examapp",
+    "productName": "Exam Application",
+    "copyright": "Copyright © 2023 Your Company",
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": {
+      "name": "exam-app-protocol",
+      "schemes": ["exam-app-protocol"]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.education",
+      "target": "dmg"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "maintainer": "your-email@example.com"
+    }
+  },
+  "dependencies": {
+    "@electron/remote": "^2.1.3"
+  },
+  "devDependencies": {
+    "electron": "^37.2.1",
+    "electron-builder": "^26.0.12"
+  }
+}

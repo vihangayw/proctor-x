@@ -1,0 +1,11 @@
+# Ignore node modules
+node_modules/
+
+# Ignore dist folder
+dist/
+.idea/
+
+# Optional: OS and IDE specific files
+.DS_Store
+.env
+*.log
