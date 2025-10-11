@@ -27,12 +27,12 @@ const CONFIG = {
 // LiveKit Configuration
 const LIVEKIT_CONFIG = {
     url: 'wss://live.codepulsesolution.com/',
-    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0c2xpdmVraXQiLCJleHAiOjE3NjAyMDU1MTYsInN1YiI6IjIiLCJuYW1lIjoiRCBQIEZFUk5BTkRPICgyNDEwMTAyKSIsIm1ldGFkYXRhIjoibWV0YWRhdGEiLCJ2aWRlbyI6eyJyb29tSm9pbiI6dHJ1ZSwicm9vbSI6ImRlbW9fY2xhc3MifSwic2lwIjp7fX0.tn9PVyN9jEy0Qn8FFik2NC5SF1k8ERE4ZSCVAP1CL8Q',
+    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0c2xpdmVraXQiLCJleHAiOjE3NjAyMTU1MjUsInN1YiI6IjIiLCJuYW1lIjoiRCBQIEZFUk5BTkRPICgyNDEwMTAyKSIsIm1ldGFkYXRhIjoibWV0YWRhdGEiLCJ2aWRlbyI6eyJyb29tSm9pbiI6dHJ1ZSwicm9vbSI6ImRlbW9fY2xhc3MiLCJjYW5QdWJsaXNoRGF0YSI6dHJ1ZSwiY2FuUHVibGlzaCI6dHJ1ZSwiY2FuU3Vic2NyaWJlIjpmYWxzZX0sInNpcCI6e319.mVGStKfZ-sGAWkh3vgbp5x_guYY05t9RgQm9KsjMgJM',
     roomName: 'demo_class',
     participantName: 'Screen Sharer'
 };
 
-const openScreenShare = async (quizId) => {
+const openScreenShare = async (quizId, examInfo) => {
     console.info('openScreenShare')
     try {
         const sources = await window.electronAPI.getSources();
@@ -154,7 +154,7 @@ const openScreenShare = async (quizId) => {
         // === LiveKit Integration ===
         // Connect to LiveKit for screen sharing
         console.log('🔗 Starting LiveKit connection...');
-        await connectToLiveKit(stream, quizId);
+        await connectToLiveKit(stream, quizId, examInfo);
 
     } catch (err) {
         console.error('Error sharing screen:', err);
@@ -164,7 +164,14 @@ const openScreenShare = async (quizId) => {
 shareScreenBtn.addEventListener('click', async () => {
     try {
         // Ensure we have user gesture for getDisplayMedia
-        await openScreenShare('9026');
+        // For testing, create a mock exam info with both camera and screen enabled
+        const mockExamInfo = {
+            id: 9026,
+            shareScreen: true,
+            camera: true,
+            qname: 'Test Exam'
+        };
+        await openScreenShare('9026', mockExamInfo);
     } catch (error) {
         console.error('Error starting screen share:', error);
         if (error.name === 'InvalidStateError') {
@@ -215,7 +222,7 @@ const publishToKurento = async (ws, stream, screenSharerName) => {
 };
 
 // === LiveKit Functions ===
-const connectToLiveKit = async (screenStream, quizId) => {
+const connectToLiveKit = async (screenStream, quizId, examInfo) => {
     try {
         console.log('🔗 Connecting to LiveKit...');
 
@@ -247,7 +254,7 @@ const connectToLiveKit = async (screenStream, quizId) => {
         livekitRoom.on(LiveKit.RoomEvent.Connected, () => {
             console.log('✅ Connected to LiveKit room');
             livekitConnected = true;
-            handleLiveKitConnected(livekitRoom, screenStream);
+            handleLiveKitConnected(livekitRoom, screenStream, examInfo);
         });
 
         // Add debugging for all room events
@@ -347,7 +354,7 @@ const connectToLiveKit = async (screenStream, quizId) => {
         if (livekitRoom.state === LiveKit.ConnectionState.Connected && !livekitConnected) {
             console.log('⚠️ Connection state is Connected but event didn\'t fire, manually triggering...');
             livekitConnected = true;
-            handleLiveKitConnected(livekitRoom, screenStream);
+            handleLiveKitConnected(livekitRoom, screenStream, examInfo);
         } else {
             if (!livekitRoom) {
                 console.error('❌ livekitRoom is undefined — connection may have failed.');
@@ -364,9 +371,9 @@ const connectToLiveKit = async (screenStream, quizId) => {
             }
 
             if (livekitRoom.localParticipant && !livekitConnected) {
-                console.log('⚠️ Local participant available but Connected event didn’t fire. Triggering manually...');
+                console.log('⚠️ Local participant available but Connected event did not fire. Triggering manually...');
                 livekitConnected = true;
-                handleLiveKitConnected(livekitRoom, screenStream);
+                handleLiveKitConnected(livekitRoom, screenStream, examInfo);
             }
         }
 
@@ -377,17 +384,73 @@ const connectToLiveKit = async (screenStream, quizId) => {
     }
 };
 
-const handleLiveKitConnected = async (room, screenStream) => {
+// 📹 Separate function for camera sharing
+const shareCameraFeed = async (room) => {
     try {
-        console.log('🎯 Setting up screen sharing in LiveKit...');
-        console.log('📺 Screen stream available:', !!screenStream);
-        console.log('📺 Screen stream tracks:', screenStream?.getTracks()?.length || 0);
-        console.info(screenStream);
+        console.log('📹 Setting up camera feed...');
 
-        // Disable microphone (not needed for screen sharing)
-        await room.localParticipant.setMicrophoneEnabled(false);
-        console.log('🔇 Microphone disabled');
+        // Get camera stream with reduced quality
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: {ideal: 320, max: 640},
+                height: {ideal: 240, max: 480},
+                frameRate: {ideal: 10, max: 15}
+            },
+            audio: false // We'll handle audio separately if needed
+        });
 
+        console.log('📹 Camera stream obtained:', {
+            id: cameraStream.id,
+            active: cameraStream.active,
+            trackCount: cameraStream.getTracks().length
+        });
+
+        // Extract camera video track
+        const cameraVideoTracks = cameraStream.getVideoTracks();
+        if (cameraVideoTracks.length > 0) {
+            const cameraMediaStreamTrack = cameraVideoTracks[0];
+
+            // Create LiveKit camera track
+            const cameraTrack = new LiveKit.LocalVideoTrack(cameraMediaStreamTrack, {
+                name: 'camera',
+            });
+
+            // Set camera source
+            cameraTrack.source = LiveKit.Track.Source.Camera;
+
+            // Publish camera track with reduced quality
+            const cameraPublication = await room.localParticipant.publishTrack(cameraTrack, {
+                simulcast: false, // Disable simulcast for lower bandwidth
+                videoEncoding: {
+                    maxBitrate: 200000, // 200 kbps for camera (very low bandwidth)
+                    maxFramerate: 10
+                }
+            });
+
+            console.log('✅ Camera feed published successfully at reduced quality (240p, 200kbps).');
+            console.log('📊 Camera publication details:', {
+                trackSid: cameraPublication.trackSid,
+                trackName: cameraPublication.trackName,
+                source: cameraPublication.source,
+                simulcast: cameraPublication.simulcast,
+            });
+
+            // Store camera stream for cleanup
+            room.cameraStream = cameraStream;
+            return cameraTrack;
+        }
+    } catch (cameraError) {
+        console.warn('⚠️ Could not set up camera feed:', cameraError.message);
+        console.log('ℹ️ Continuing without camera feed...');
+        return null;
+    }
+};
+
+// 🖥️ Separate function for screen sharing
+const shareScreenFeed = async (room, screenStream) => {
+    try {
+        console.log('🖥️ Setting up screen sharing...');
+        
         // Log screen stream details
         console.log('🎥 Screen stream details:', {
             id: screenStream.id,
@@ -402,7 +465,7 @@ const handleLiveKitConnected = async (room, screenStream) => {
             readyState: track.readyState
         })));
 
-        // 2️⃣ Extract the video track from the existing screen stream
+        // Extract the video track from the existing screen stream
         console.info("MMMM ", screenStream)
         const videoTracks = screenStream.getVideoTracks();
         if (videoTracks.length === 0) {
@@ -410,15 +473,15 @@ const handleLiveKitConnected = async (room, screenStream) => {
         }
         const mediaStreamTrack = videoTracks[0];
 
-        // 3️⃣ Wrap it in a LiveKit LocalVideoTrack (and mark it as screen share)
+        // Wrap it in a LiveKit LocalVideoTrack (and mark it as screen share)
         const screenTrack = new LiveKit.LocalVideoTrack(mediaStreamTrack, {
             name: 'screen-share',
         });
 
-        // 4️⃣ Override its source for clarity
+        // Override its source for clarity
         screenTrack.source = LiveKit.Track.Source.ScreenShare;
 
-        // 5️⃣ Publish the screen share track
+        // Publish the screen share track
         const publication = await room.localParticipant.publishTrack(screenTrack, {
             simulcast: false, // Screen sharing typically doesn't need simulcast
             videoEncoding: {
@@ -430,19 +493,64 @@ const handleLiveKitConnected = async (room, screenStream) => {
         console.log('✅✅✅✅✅ Created and published LiveKit LocalVideoTrack from screen stream at 540p quality.', screenTrack);
 
         console.log('✅ Screen share published successfully.');
-        console.log('📊 Publication details:', {
+        console.log('📊 Screen share publication details:', {
             trackSid: publication.trackSid,
             trackName: publication.trackName,
             source: publication.source,
             simulcast: publication.simulcast,
         });
 
+        return screenTrack;
+    } catch (error) {
+        console.error('❌ Error setting up screen sharing:', error);
+        throw error;
+    }
+};
+
+const handleLiveKitConnected = async (room, screenStream, examInfo) => {
+    try {
+        console.log('🎯 Setting up LiveKit streams based on exam requirements...');
+        console.log('📺 Screen stream available:', !!screenStream);
+        console.log('📋 Exam requirements:', {
+            shareScreen: examInfo?.shareScreen,
+            camera: examInfo?.camera
+        });
+
+        // Disable microphone (not needed for screen sharing)
+        await room.localParticipant.setMicrophoneEnabled(false);
+        console.log('🔇 Microphone disabled');
+
+        let cameraTrack = null;
+        let screenTrack = null;
+
+        // 📹 FIRST: Share camera feed (if required)
+        if (examInfo?.camera) {
+            console.log('🚀 Starting with camera feed first...');
+            cameraTrack = await shareCameraFeed(room);
+        } else {
+            console.log('ℹ️ Camera feed not required for this exam');
+        }
+
+        // 🖥️ SECOND: Share screen feed (if required)
+        if (examInfo?.shareScreen) {
+            console.log('🚀 Now sharing screen feed...');
+            screenTrack = await shareScreenFeed(room, screenStream);
+        } else {
+            console.log('ℹ️ Screen sharing not required for this exam');
+        }
+
+        console.log('🎉 Stream setup completed!');
+        console.log('📊 Active tracks:', {
+            camera: cameraTrack ? '✅ Active' : '❌ Not required',
+            screen: screenTrack ? '✅ Active' : '❌ Not required'
+        });
+
         // Show LiveKit room UI and render the participant
         // showLiveKitRoom();
-        // renderLocalParticipant(room.localParticipant, screenTrack, null);
+        // renderLocalParticipant(room.localParticipant, screenTrack, cameraTrack);
 
     } catch (error) {
-        console.error('❌ Error setting up screen sharing in LiveKit:', error);
+        console.error('❌ Error setting up LiveKit streams:', error);
         console.error('❌ Error message:', error.message);
         console.error('❌ Error stack:', error.stack);
     }
@@ -704,6 +812,14 @@ const disconnectFromLiveKit = async () => {
     if (livekitRoom && livekitConnected) {
         try {
             console.log('🔌 Disconnecting from LiveKit...');
+
+            // Stop camera stream if it exists
+            if (livekitRoom.cameraStream) {
+                console.log('📹 Stopping camera stream...');
+                livekitRoom.cameraStream.getTracks().forEach(track => track.stop());
+                livekitRoom.cameraStream = null;
+            }
+            
             await livekitRoom.disconnect();
         } catch (error) {
             console.error('❌ Error disconnecting from LiveKit:', error);
@@ -713,7 +829,7 @@ const disconnectFromLiveKit = async () => {
 
 stopShareBtn.addEventListener('click', async () => {
     if (stream) {
-        // Disconnect from LiveKit first
+        // Disconnect from LiveKit first (this will also stop camera stream)
         await disconnectFromLiveKit();
 
         // Stop screen sharing stream
@@ -723,7 +839,7 @@ stopShareBtn.addEventListener('click', async () => {
         body.classList.remove('screen-sharing-active')
         shareScreenBtn.disabled = false
         stopShareBtn.disabled = true
-        console.log('Screen sharing stopped manually')
+        console.log('Screen sharing and camera feed stopped manually')
     }
 })
 
@@ -794,18 +910,26 @@ window.electronAPI.onLaunchData(async (data) => {
     iframe.src = examUrl;
 
     console.log('🔍 Getting exam info...');
-    const share = await getExamInfo(quizId, tkn); // ✅ await here
-    console.log('📺 Share screen required:', share);
-    if (share) {
-        console.log('👤 Getting student info...');
-        getStudentInfo(studentId, tkn, quizId);
+    const examInfo = await getExamInfo(quizId, tkn); // ✅ await here
+    if (examInfo) {
+        console.log('📺 Exam requirements:', {
+            shareScreen: examInfo.shareScreen,
+            camera: examInfo.camera
+        });
+
+        if (examInfo.shareScreen || examInfo.camera) {
+            console.log('👤 Getting student info...');
+            getStudentInfo(studentId, tkn, quizId, examInfo);
+        } else {
+            console.log('ℹ️ No screen sharing or camera required for this exam');
+        }
     } else {
-        console.log('ℹ️ Screen sharing not required for this exam');
+        console.log('❌ Could not get exam info');
     }
 });
 
 
-const getStudentInfo = async (spid, tkn, quizId) => {
+const getStudentInfo = async (spid, tkn, quizId, examInfo) => {
     try {
         const response = await fetch(`${CONFIG.BASE_API_URL}/vle/student/get-login/${spid}`, {
             method: 'POST',
@@ -826,7 +950,7 @@ const getStudentInfo = async (spid, tkn, quizId) => {
         localStorage.setItem('user_details', JSON.stringify(userData));
         localStorage.setItem('ws_token', userData.wsToken);
 
-        openScreenShare(quizId);
+        openScreenShare(quizId, examInfo);
     } catch (error) {
         console.error('Error calling login API:', error);
     }
@@ -848,10 +972,16 @@ const getExamInfo = async (qid, tkn) => {
         const res = await response.json();
         const exam = res.data;
 
-        if (exam?.shareScreen) return true
-        return false;
+        console.log('📋 Exam configuration:', {
+            id: exam.id,
+            shareScreen: exam.shareScreen,
+            camera: exam.camera,
+            qname: exam.qname
+        });
+
+        return exam; // Return full exam data instead of just boolean
     } catch (error) {
-        console.error('Error calling login API:', error);
-        return false;
+        console.error('Error calling exam info API:', error);
+        return null;
     }
 }
