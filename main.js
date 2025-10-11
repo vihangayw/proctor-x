@@ -30,12 +30,12 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        // kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        // alwaysOnTop: true, // Keep window on top of others
+        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: true, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
-        closable: true, // Disable close button (use with caution!)
+        closable: true, // Enable close button
         titleBarStyle: 'hidden', // Alternative to frame: false on macOS
         autoHideMenuBar: true,// Alternative for menu visibility
         width: 1000, // Default width (will be overridden by fullscreen)
@@ -69,8 +69,13 @@ function createWindow() {
 
 
     mainWindow.webContents.on('did-finish-load', () => {
+        console.log('Window finished loading, checking for deeplink data...');
         if (deeplinkData) {
+            console.log('Found deeplink data, sending to renderer...');
             mainWindow.webContents.send('launch-data', deeplinkData);
+            console.log('Launch data sent from did-finish-load handler');
+        } else {
+            console.log('No deeplink data available yet');
         }
     });
     // Optional: Make sure window stays fullscreen even if user tries to exit
@@ -90,6 +95,31 @@ function createWindow() {
         }
     });
 
+    // Handle window close with confirmation dialog
+    mainWindow.on('close', (event) => {
+        event.preventDefault(); // Prevent default close behavior
+
+        dialog.showMessageBox(mainWindow, {
+            type: 'question',
+            buttons: ['Yes, Exit', 'Cancel'],
+            defaultId: 1, // Default to Cancel
+            cancelId: 1,
+            title: 'Exit ProctorX',
+            message: 'Are you sure you want to exit application?',
+            detail: 'This will close the application completely and you will need to restart it to continue.'
+        }).then((result) => {
+            if (result.response === 0) { // User clicked "Yes, Exit"
+                // Force quit the application completely
+                app.exit(0);
+            }
+            // If user clicked Cancel, do nothing (window stays open)
+        }).catch((err) => {
+            console.error('Error showing exit dialog:', err);
+            // If dialog fails, allow close
+            app.exit(0);
+        });
+    });
+
 }
 
 app.on('open-url', (event, url) => {
@@ -98,14 +128,46 @@ app.on('open-url', (event, url) => {
 
     try {
         const parsed = new URL(url);
-        const parts = parsed.pathname.split('/'); // ['e-quiz', 'quizId', 'studentId', 'uuid']
-        console.log(parts)
-        if (parts[1] === '56565f34-9e79-4f6e-972e-0aefbfcc111e') {
-            const [_, __, quizId, studentId, tkn, sqid] = parts;
-            deeplinkData = {quizId, studentId, tkn, sqid};
+        const parts = parsed.pathname.split('/').filter(Boolean); // Remove empty strings
+        console.log('URL parts:', parts);
+
+        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId']
+        // The 'e-quiz' is part of the hostname, not pathname
+        if (parts.length >= 5) {
+            const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
+            deeplinkData = {quizId, studentId, tkn, sqid: studentQuizId};
+            console.log('Parsed deeplink data:', deeplinkData);
+            
             if (mainWindow) {
-                mainWindow.webContents.send('launch-data', deeplinkData);
+                console.log('Main window found, sending data...');
+                // Focus the window
+                if (mainWindow.isMinimized()) {
+                    console.log('Window was minimized, restoring...');
+                    mainWindow.restore();
+                }
+                mainWindow.focus();
+                console.log('Window focused');
+
+                // Send data when window is ready
+                if (mainWindow.webContents.isLoading()) {
+                    console.log('Window is still loading, waiting for did-finish-load...');
+                    mainWindow.webContents.once('did-finish-load', () => {
+                        console.log('Window finished loading, sending launch data...');
+                        mainWindow.webContents.send('launch-data', deeplinkData);
+                        console.log('Launch data sent successfully');
+                    });
+                } else {
+                    console.log('Window already loaded, sending launch data immediately...');
+                    // Send a test message first to verify IPC is working
+                    mainWindow.webContents.send('test-message', 'IPC test from main process');
+                    mainWindow.webContents.send('launch-data', deeplinkData);
+                    console.log('Launch data sent successfully');
+                }
+            } else {
+                console.error('Main window not found');
             }
+        } else {
+            console.error('Invalid URL structure. Expected: proctorx://e-quiz/quizId/studentId/sequence/token/sqid');
         }
     } catch (err) {
         console.error('Invalid URL:', err);
@@ -125,14 +187,35 @@ app.on('web-contents-created', (_, contents) => {
 
 app.whenReady().then(() => {
     globalShortcut.register('CommandOrControl+Shift+Q', () => {
-        app.quit();
+        // Show confirmation dialog before quitting
+        if (mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+                type: 'question',
+                buttons: ['Yes, Exit', 'Cancel'],
+                defaultId: 1, // Default to Cancel
+                cancelId: 1,
+                title: 'Exit ProctorX',
+                message: 'Are you sure you want to exit application?',
+                detail: 'This will close the application completely and you will need to restart it to continue.'
+            }).then((result) => {
+                if (result.response === 0) { // User clicked "Yes, Exit"
+                    app.exit(0);
+                }
+            }).catch((err) => {
+                console.error('Error showing exit dialog:', err);
+                app.exit(0);
+            });
+        } else {
+            app.exit(0);
+        }
     });
 });
 app.whenReady().then(() => {
     app.setAsDefaultProtocolClient('proctorx');
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        // Don't create new windows on activate - let the app stay closed
+        // if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
 
 });
@@ -141,12 +224,50 @@ app.whenReady().then(() => {
 app.on('second-instance', (event, argv) => {
     const url = argv.find((arg) => arg.startsWith('proctorx://'));
     if (url) {
-        const u = new URL(url);
-        const parts = u.pathname.split('/').filter(Boolean);
-        const [_, quizId, studentId, tkn, sqid] = parts;
-        deeplinkData = {quizId, studentId, tkn, sqid};
-        if (mainWindow) {
-            mainWindow.webContents.send('launch-data', deeplinkData);
+        console.log('Second instance URL:', url);
+        try {
+            const u = new URL(url);
+            const parts = u.pathname.split('/').filter(Boolean);
+            console.log('Second instance URL parts:', parts);
+
+            // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId']
+            // The 'e-quiz' is part of the hostname, not pathname
+            if (parts.length >= 5) {
+                const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
+                deeplinkData = {quizId, studentId, tkn, sqid: studentQuizId};
+                console.log('Second instance parsed deeplink data:', deeplinkData);
+
+                if (mainWindow) {
+                    console.log('Main window found, focusing and sending data...');
+                    // Focus the existing window
+                    if (mainWindow.isMinimized()) {
+                        console.log('Window was minimized, restoring...');
+                        mainWindow.restore();
+                    }
+                    mainWindow.focus();
+                    console.log('Window focused');
+
+                    // Send data when window is ready
+                    if (mainWindow.webContents.isLoading()) {
+                        console.log('Window is still loading, waiting for did-finish-load...');
+                        mainWindow.webContents.once('did-finish-load', () => {
+                            console.log('Window finished loading, sending launch data...');
+                            mainWindow.webContents.send('launch-data', deeplinkData);
+                            console.log('Launch data sent successfully');
+                        });
+                    } else {
+                        console.log('Window already loaded, sending launch data immediately...');
+                        mainWindow.webContents.send('launch-data', deeplinkData);
+                        console.log('Launch data sent successfully');
+                    }
+                } else {
+                    console.error('Main window not found in second instance');
+                }
+            } else {
+                console.error('Invalid URL structure in second instance. Expected: proctorx://e-quiz/quizId/studentId/sequence/token/sqid');
+            }
+        } catch (err) {
+            console.error('Invalid URL in second instance:', err);
         }
     }
 });
@@ -155,11 +276,10 @@ ipcMain.handle('get-sources', async () => {
     return await desktopCapturer.getSources({types: ['window', 'screen']})
 })
 
-// Quit when all windows are closed
+// Quit when all windows are closed - force quit completely
 app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit()
-    }
+    // Force quit the application completely on all platforms
+    app.exit(0);
 })
 ipcMain.handle('show-dialog', async (_, options) => {
     const result = await dialog.showMessageBox({

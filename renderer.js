@@ -71,7 +71,7 @@ const openScreenShare = async (quizId) => {
         const ws_token = localStorage.getItem('ws_token');
         const userDetails = JSON.parse(localStorage.getItem('user_details'));
         console.log(userDetails);
-        const username = userDetails.email;
+        const username = userDetails.email + '_scrn';
         const password = userDetails.id;
         const roomName = quizId; // replace with actual room name
         const screenSharerName = username;
@@ -182,27 +182,47 @@ document.addEventListener('DOMContentLoaded', () => {
     const quizUrl = CONFIG.BASE_LANDING; // should be something like './landing.html'
     console.info('Loading:', quizUrl);
     iframe.src = quizUrl;
+
+    // Test IPC communication
+    console.log('🔧 Testing IPC communication...');
+    console.log('🔧 electronAPI available:', !!window.electronAPI);
+    console.log('🔧 onLaunchData function available:', !!window.electronAPI?.onLaunchData);
+
+    // Test message handler
+    if (window.electronAPI && window.electronAPI.onTestMessage) {
+        window.electronAPI.onTestMessage((message) => {
+            console.log('🧪 Test message received:', message);
+        });
+    }
 });
 
 // === On Launch Data from Electron ===
 window.electronAPI.onLaunchData(async (data) => {
-    console.info("onLaunchData");
+    console.info("🚀 onLaunchData received!");
+    console.log('📊 Got launch data:', data);
+    
     const {quizId, studentId, tkn, sqid} = data;
-
-    console.log('Got launch data:', data);
+    console.log('📋 Extracted parameters:', {quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid});
 
     const iframe = document.getElementById('lmsFrame');
-    iframe.src = `${CONFIG.BASE_LMS_URL}/mcq-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
+    const examUrl = `${CONFIG.BASE_LMS_URL}/mcq-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
+    console.log('🌐 Loading exam URL:', examUrl);
 
+    iframe.src = examUrl;
+
+    console.log('🔍 Getting exam info...');
     const share = await getExamInfo(quizId, tkn); // ✅ await here
-    console.log('Share screen ', share);
+    console.log('📺 Share screen required:', share);
     if (share) {
-        getStudentInfo(quizId, studentId, tkn);
+        console.log('👤 Getting student info...');
+        getStudentInfo(studentId, tkn, quizId);
+    } else {
+        console.log('ℹ️ Screen sharing not required for this exam');
     }
 });
 
 
-const getStudentInfo = async (spid, tkn) => {
+const getStudentInfo = async (spid, tkn, quizId) => {
     try {
         const response = await fetch(`${CONFIG.BASE_API_URL}/vle/student/get-login/${spid}`, {
             method: 'POST',
