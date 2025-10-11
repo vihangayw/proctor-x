@@ -68,7 +68,7 @@
   </style>
 </head>
 <body>
-<div style="display: none" class="controls">
+<div class="controls">
   <button id="shareScreen">Share Screen</button>
   <button id="stopShare" disabled>Stop Sharing</button>
   <button id="exitApp">Exit Application</button>
@@ -77,12 +77,27 @@
 <div class="content-container">
   <iframe id="lmsFrame"
           allowfullscreen
-          allow="camera; microphone; fullscreen"
+          allow="camera; microphone; fullscreen; display-capture; autoplay; encrypted-media; picture-in-picture"
           style="flex:1; width:100%; border:none;"></iframe>
 
     <!--  <video id="screenView" autoplay></video>-->
+
+    <!-- LiveKit Room Container -->
+    <div id="livekit-room"
+         style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000;">
+        <div style="position: absolute; top: 20px; right: 20px;">
+            <button id="closeLivekit"
+                    style="background: #f44336; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer;">
+                Close
+            </button>
+        </div>
+        <div id="livekit-participants" style="display: flex; flex-wrap: wrap; gap: 10px; padding: 20px;">
+            <!-- LiveKit participants will be rendered here -->
+        </div>
+    </div>
 </div>
 
-<script src="renderer.js"></script>
+<!-- LiveKit Scripts -->
+<script type="module" src="renderer.js"></script>
 </body>
 </html>

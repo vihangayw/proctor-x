@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onLaunchData: (callback) => ipcRenderer.on('launch-data', (event, data) => callback(data)),
     onTestMessage: (callback) => ipcRenderer.on('test-message', (event, data) => callback(data)),
   getPlatform: () => process.platform,
+    // Add method to get display media stream from Electron
+    getDisplayMedia: () => ipcRenderer.invoke('get-display-media'),
 });

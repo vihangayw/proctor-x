@@ -1,7 +1,12 @@
-const {app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage} = require('electron')
+const {app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session} = require('electron')
 const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const {globalShortcut} = require('electron');
+
+// Enable screen capture in Electron
+app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
+app.commandLine.appendSwitch('allow-http-screen-capture')
+app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 
 let mainWindow
 
@@ -30,8 +35,8 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        alwaysOnTop: true, // Keep window on top of others
+        // kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        // alwaysOnTop: true, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
@@ -47,9 +52,24 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             enableRemoteModule: false,
-            sandbox: true, // recommended for security
-            webSecurity: true, // keep this true unless testing locally
-            media: true,
+            sandbox: false, // Disable sandbox for screen sharing
+            webSecurity: false, // Disable for development to allow getDisplayMedia
+            allowRunningInsecureContent: true,
+            experimentalFeatures: true,
+            nodeIntegration: false,
+            nodeIntegrationInWorker: false,
+            nodeIntegrationInSubFrames: false,
+            // ✅ Required for screen capture
+            media: {
+                audio: true,
+                video: true,
+                videoCapture: true,
+                audioCapture: true,
+            },
+            // webSecurity: true,
+            // ✅ These two flags are critical:
+            permissions: ['display-capture'],
+            // allowRunningInsecureContent: false,
         },
         icon: iconPath
     })
@@ -93,6 +113,11 @@ function createWindow() {
         if (devToolShortcuts) {
             event.preventDefault();
         }
+    });
+    mainWindow.webContents.session.setPermissionCheckHandler(() => true);
+    mainWindow.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
+        if (permission === 'media' || permission === 'display-capture') cb(true);
+        else cb(false);
     });
 
     // Handle window close with confirmation dialog
@@ -176,9 +201,14 @@ app.on('open-url', (event, url) => {
 
 app.setAsDefaultProtocolClient('proctorx');
 app.on('web-contents-created', (_, contents) => {
+    contents.session.setPermissionCheckHandler((webContents, permission) => {
+        // if (permission === 'display-capture') return true;
+        return true;
+    });
+
     contents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-        if (permission === 'media') {
-            // Allow camera/mic
+        if (permission === 'media' || permission === 'display-capture') {
+            // Allow camera/mic and screen capture
             return callback(true);
         }
         callback(false);
@@ -274,6 +304,40 @@ app.on('second-instance', (event, argv) => {
 // Handle getting screen sources
 ipcMain.handle('get-sources', async () => {
     return await desktopCapturer.getSources({types: ['window', 'screen']})
+})
+
+// Handle getting display media stream
+ipcMain.handle('get-display-media', async () => {
+    try {
+        const sources = await desktopCapturer.getSources({types: ['screen']});
+        if (sources.length === 0) {
+            throw new Error('No screen sources available');
+        }
+
+        // Get the first screen source
+        const source = sources[0];
+
+        // Create a stream using getUserMedia with the screen source
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: source.id,
+                    minWidth: 1280,
+                    maxWidth: 1280,
+                    minHeight: 720,
+                    maxHeight: 720,
+                    maxFrameRate: 15,
+                }
+            }
+        });
+
+        return stream;
+    } catch (error) {
+        console.error('Error getting display media:', error);
+        throw error;
+    }
 })
 
 // Quit when all windows are closed - force quit completely
