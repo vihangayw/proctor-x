@@ -84,10 +84,10 @@ const openScreenShare = async (quizId) => {
                         mandatory: {
                             chromeMediaSource: 'desktop',
                             chromeMediaSourceId: selectedSource.id,
-                            minWidth: 1280,
-                            maxWidth: 1280,
-                            minHeight: 720,
-                            maxHeight: 720,
+                            minWidth: 960,
+                            maxWidth: 960,
+                            minHeight: 540,
+                            maxHeight: 540,
                             maxFrameRate: 15,
                         }
                     }
@@ -234,7 +234,7 @@ const connectToLiveKit = async (screenStream, quizId) => {
                 simulcast: true
             },
             videoCaptureDefaults: {
-                resolution: {width: 1280, height: 720}
+                resolution: {width: 960, height: 540}
             }
         };
 
@@ -421,9 +421,13 @@ const handleLiveKitConnected = async (room, screenStream) => {
         // 5️⃣ Publish the screen share track
         const publication = await room.localParticipant.publishTrack(screenTrack, {
             simulcast: false, // Screen sharing typically doesn't need simulcast
+            videoEncoding: {
+                maxBitrate: 1000000, // 1 Mbps for 540p
+                maxFramerate: 15
+            }
         });
 
-        console.log('✅✅✅✅✅ Created and published LiveKit LocalVideoTrack from screen stream.', screenTrack);
+        console.log('✅✅✅✅✅ Created and published LiveKit LocalVideoTrack from screen stream at 540p quality.', screenTrack);
 
         console.log('✅ Screen share published successfully.');
         console.log('📊 Publication details:', {
