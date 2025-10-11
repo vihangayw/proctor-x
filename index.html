@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Screen Sharing App</title>
+    <title>ProctorX</title>
   <style>
     body {
       margin: 0;
@@ -58,16 +58,17 @@
       background: #000;
       display: none; /* Hidden by default */
     }
-    .screen-sharing-active #lmsFrame {
-      display: none;
-    }
-    .screen-sharing-active #screenView {
-      display: block;
-    }
+
+    /*.screen-sharing-active #lmsFrame {*/
+    /*  display: none;*/
+    /*}*/
+    /*.screen-sharing-active #screenView {*/
+    /*  display: block;*/
+    /*}*/
   </style>
 </head>
 <body>
-<div class="controls">
+<div style="display: none" class="controls">
   <button id="shareScreen">Share Screen</button>
   <button id="stopShare" disabled>Stop Sharing</button>
   <button id="exitApp">Exit Application</button>
@@ -79,7 +80,7 @@
           allow="camera; microphone; fullscreen"
           style="flex:1; width:100%; border:none;"></iframe>
 
-  <video id="screenView" autoplay></video>
+    <!--  <video id="screenView" autoplay></video>-->
 </div>
 
 <script src="renderer.js"></script>

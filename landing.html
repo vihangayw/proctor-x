@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Welcome to EQuiz</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: url('bg.webp') no-repeat center center fixed;
+            background-size: cover;
+            position: relative;
+            color: #333;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.4); /* White fade overlay */
+            animation: fadeInBg .1s ease-in forwards;
+            z-index: 0;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+        }
+
+        @keyframes fadeInBg {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.8); /* Faded overlay */
+            z-index: 0;
+        }
+
+        .container {
+            background-color: rgba(255, 255, 255, 0.76);
+            border-radius: 16px;
+            padding: 40px 30px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.41);
+            animation: fadeIn 0.6s ease-in;
+            position: relative;
+            z-index: 1;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            font-weight: 600;
+            color: #e96b00;
+        }
+
+        p {
+            font-size: 1rem;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .highlight {
+            color: #e96b00;
+            font-weight: 600;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .steps {
+            text-align: left;
+            margin-top: 30px;
+            padding: 20px;
+            background: rgb(255, 247, 240);
+            border-left: 4px solid #e96b00;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07); /* Drop shadow added */
+        }
+
+
+        .steps li {
+            margin-bottom: 12px;
+        }
+
+        .footer {
+            margin-top: 30px;
+            font-size: 0.85rem;
+            color: #777;
+        }
+
+        ol {
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <img src="./logo.png" alt="Logo" style="width: 140px; margin-bottom: 8px;">
+    <p style="color: rgb(170,170,170)"><i>Exam with confidence, we’ll handle the rest.</i></p>
+
+    <div class="steps">
+        <p><strong>To begin:</strong></p>
+        <ol>
+            <li>Login to your LMS</li>
+            <li>Go to <span class="highlight">Examinations → EQuiz</span></li>
+            <li>Click <span class="highlight">Start</span> on your available exam/quiz</li>
+            <li>Then click the <span class="highlight">Open Proctor X</span> button in the popup</li>
+        </ol>
+
+        <small>Press Command Or Control+Shift+Q to Exit</small>
+    </div>
+
+    <div style="color: rgba(170,170,170,0.7); font-size: 12px" class="footer ">Powered by CPS. <br>Version 1.0.0</div>
+</div>
+
+</body>
+</html>

@@ -1,5 +1,6 @@
 {
-  "name": "exam-application",
+  "name": "ProctorX",
+  "productName": "ProctorX",
   "version": "1.0.0",
   "description": "Electron application for online exams",
   "author": "Your Name <your.email@example.com>",
@@ -11,7 +12,7 @@
   },
   "bugs": {
     "url": "https://github.com/your-username/exam-application/issues"
-   },
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -20,15 +21,24 @@
     "dist": "electron-builder"
   },
   "build": {
-    "appId": "com.yourcompany.examapp",
-    "productName": "Exam Application",
-    "copyright": "Copyright © 2023 Your Company",
+    "appId": "com.cps.proctorx",
+    "productName": "Proctor X",
+    "copyright": "Copyright © 2025 CPS",
     "directories": {
       "output": "dist"
     },
-    "protocols": {
-      "name": "exam-app-protocol",
-      "schemes": ["exam-app-protocol"]
+    "protocols": [
+      {
+        "name": "Proctor X",
+        "schemes": [
+          "proctorx"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": "dmg",
+      "icon": "assets/icon.icns"
     },
     "win": {
       "target": [
@@ -36,15 +46,13 @@
           "target": "portable",
           "arch": ["x64"]
         }
-      ]
-    },
-    "mac": {
-      "category": "public.app-category.education",
-      "target": "dmg"
+      ],
+      "icon": "assets/icon.ico"
     },
     "linux": {
       "target": ["AppImage", "deb"],
-      "maintainer": "your-email@example.com"
+      "maintainer": "your-email@example.com",
+      "icon": "assets/icon.png"
     }
   },
   "dependencies": {
