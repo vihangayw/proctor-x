@@ -19,7 +19,7 @@ let livekitConnected = false
 
 const CONFIG = {
     BASE_API_URL: 'http://localhost:8383/api/v1',
-    BASE_LMS_URL: 'http://localhost:3001',
+    BASE_LMS_URL: 'http://localhost:3000/lms-mc',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
     BASE_LANDING: './landing.html'
 };
@@ -27,7 +27,8 @@ const CONFIG = {
 // LiveKit Configuration
 const LIVEKIT_CONFIG = {
     url: 'wss://live.codepulsesolution.com/',
-    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0c2xpdmVraXQiLCJleHAiOjE3NjAyMTU1MjUsInN1YiI6IjIiLCJuYW1lIjoiRCBQIEZFUk5BTkRPICgyNDEwMTAyKSIsIm1ldGFkYXRhIjoibWV0YWRhdGEiLCJ2aWRlbyI6eyJyb29tSm9pbiI6dHJ1ZSwicm9vbSI6ImRlbW9fY2xhc3MiLCJjYW5QdWJsaXNoRGF0YSI6dHJ1ZSwiY2FuUHVibGlzaCI6dHJ1ZSwiY2FuU3Vic2NyaWJlIjpmYWxzZX0sInNpcCI6e319.mVGStKfZ-sGAWkh3vgbp5x_guYY05t9RgQm9KsjMgJM',
+    token: '\n' +
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0c2xpdmVraXQiLCJleHAiOjE3NzA5OTQ1NjIsInN1YiI6ImRmQGdtYWlsLmNvbSIsIm5hbWUiOiJEIEZlcm5hbmRvIiwibWV0YWRhdGEiOiJtZXRhZGF0YSIsInZpZGVvIjp7InJvb21Kb2luIjp0cnVlLCJyb29tIjoiZGVtb19jbGFzcyIsImNhblB1Ymxpc2hEYXRhIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOmZhbHNlfSwic2lwIjp7fX0.VA8AxvUHB5-C4XO7JgIu8phaNR-WZYoc21I_g8F0A_Q',
     roomName: 'demo_class',
     participantName: 'Screen Sharer'
 };
@@ -873,10 +874,109 @@ document.getElementById('exitApp').addEventListener('click', async () => {
 //   iframe.src = quizUrl;
 // });
 
+// === Disable Tab Key and Text Selection ===
+// Disable Tab key globally (including inside iframes)
+function disableTabKey() {
+    // Global keydown listener to catch Tab key before it reaches iframe
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' || e.keyCode === 9) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
+    }, true); // Use capture phase to catch before iframe
+
+    // Also listen on window level
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab' || e.keyCode === 9) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
+    }, true);
+
+    // Try to disable Tab in iframe if same-origin
+    const iframe = document.getElementById('lmsFrame');
+    if (iframe) {
+        iframe.addEventListener('load', () => {
+            try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (iframeDoc) {
+                    iframeDoc.addEventListener('keydown', (e) => {
+                        if (e.key === 'Tab' || e.keyCode === 9) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return false;
+                        }
+                    }, true);
+
+                    // Also disable text selection in iframe
+                    iframeDoc.addEventListener('selectstart', (e) => {
+                        e.preventDefault();
+                        return false;
+                    });
+                    iframeDoc.addEventListener('mousedown', (e) => {
+                        if (e.detail > 1) { // Double click
+                            e.preventDefault();
+                        }
+                    });
+                }
+            } catch (e) {
+                // Cross-origin iframe - can't access content
+                console.log('Iframe is cross-origin, using global handlers only');
+            }
+        });
+    }
+}
+
+// Disable text selection globally
+function disableTextSelection() {
+    // Prevent text selection events
+    document.addEventListener('selectstart', (e) => {
+        e.preventDefault();
+        return false;
+    });
+
+    document.addEventListener('dragstart', (e) => {
+        e.preventDefault();
+        return false;
+    });
+
+    // Prevent context menu (right-click)
+    document.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        return false;
+    });
+
+    // Prevent double-click selection
+    document.addEventListener('mousedown', (e) => {
+        if (e.detail > 1) { // Double click
+            e.preventDefault();
+        }
+    });
+
+    // Also on window level
+    window.addEventListener('selectstart', (e) => {
+        e.preventDefault();
+        return false;
+    });
+
+    window.addEventListener('dragstart', (e) => {
+        e.preventDefault();
+        return false;
+    });
+}
+
 // === On DOM Content Load ===
 document.addEventListener('DOMContentLoaded', () => {
     const iframe = document.getElementById('lmsFrame');
     console.info("DOMContentLoaded");
+
+    // Disable Tab key and text selection
+    disableTabKey();
+    disableTextSelection();
 
     const quizUrl = CONFIG.BASE_LANDING; // should be something like './landing.html'
     console.info('Loading:', quizUrl);
@@ -904,8 +1004,38 @@ window.electronAPI.onLaunchData(async (data) => {
     console.log('📋 Extracted parameters:', {quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid});
 
     const iframe = document.getElementById('lmsFrame');
-    const examUrl = `${CONFIG.BASE_LMS_URL}/mcq-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
+    const examUrl = `${CONFIG.BASE_LMS_URL}/exam-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
     console.log('🌐 Loading exam URL:', examUrl);
+
+    // Re-apply Tab key blocking when iframe loads new content
+    iframe.addEventListener('load', () => {
+        try {
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            if (iframeDoc) {
+                iframeDoc.addEventListener('keydown', (e) => {
+                    if (e.key === 'Tab' || e.keyCode === 9) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                }, true);
+
+                // Also disable text selection in iframe
+                iframeDoc.addEventListener('selectstart', (e) => {
+                    e.preventDefault();
+                    return false;
+                });
+                iframeDoc.addEventListener('mousedown', (e) => {
+                    if (e.detail > 1) { // Double click
+                        e.preventDefault();
+                    }
+                });
+            }
+        } catch (e) {
+            // Cross-origin iframe - can't access content
+            console.log('Iframe is cross-origin, using global handlers only');
+        }
+    }, {once: true});
 
     iframe.src = examUrl;
 
@@ -958,7 +1088,7 @@ const getStudentInfo = async (spid, tkn, quizId, examInfo) => {
 
 const getExamInfo = async (qid, tkn) => {
     try {
-        const response = await fetch(`${CONFIG.BASE_API_URL}/vle/quiz/info/${qid}`, {
+        const response = await fetch(`${CONFIG.BASE_API_URL}/vle/quiz/exam/${qid}`, {
             method: 'POST',
             headers: {
                 'Authorization': 'Bearer ' + tkn

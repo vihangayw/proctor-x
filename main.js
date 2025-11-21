@@ -1,4 +1,4 @@
-const {app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session} = require('electron')
+const {app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen} = require('electron')
 const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const {globalShortcut} = require('electron');
@@ -35,12 +35,12 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        // kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        // alwaysOnTop: true, // Keep window on top of others
+        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: true, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
-        closable: true, // Enable close button
+        closable: false, // Enable close button
         titleBarStyle: 'hidden', // Alternative to frame: false on macOS
         autoHideMenuBar: true,// Alternative for menu visibility
         width: 1000, // Default width (will be overridden by fullscreen)
@@ -90,6 +90,23 @@ function createWindow() {
 
     mainWindow.webContents.on('did-finish-load', () => {
         console.log('Window finished loading, checking for deeplink data...');
+
+        // Check for multiple displays
+        const displays = screen.getAllDisplays();
+        console.log(`Detected ${displays.length} display(s)`);
+        if (displays.length >= 2) {
+            dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                buttons: ['OK'],
+                defaultId: 0,
+                title: 'Multiple Displays Detected',
+                message: `Warning: ${displays.length} display(s) detected`,
+                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
+            }).catch((err) => {
+                console.error('Error showing display warning dialog:', err);
+            });
+        }
+        
         if (deeplinkData) {
             console.log('Found deeplink data, sending to renderer...');
             mainWindow.webContents.send('launch-data', deeplinkData);
@@ -103,6 +120,12 @@ function createWindow() {
         mainWindow.setFullScreen(true)
     })
     mainWindow.webContents.on('before-input-event', (event, input) => {
+        // Block Tab key
+        if (input.key === 'Tab') {
+            event.preventDefault();
+            return;
+        }
+        
         // Block Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS
         const devToolShortcuts = (
             (input.key === 'I' && input.control && input.shift) || // Ctrl+Shift+I
@@ -201,6 +224,13 @@ app.on('open-url', (event, url) => {
 
 app.setAsDefaultProtocolClient('proctorx');
 app.on('web-contents-created', (_, contents) => {
+    // Block Tab key on all windows
+    contents.on('before-input-event', (event, input) => {
+        if (input.key === 'Tab') {
+            event.preventDefault();
+        }
+    });
+    
     contents.session.setPermissionCheckHandler((webContents, permission) => {
         // if (permission === 'display-capture') return true;
         return true;
@@ -215,39 +245,11 @@ app.on('web-contents-created', (_, contents) => {
     });
 });
 
-app.whenReady().then(() => {
-    globalShortcut.register('CommandOrControl+Shift+Q', () => {
-        // Show confirmation dialog before quitting
-        if (mainWindow) {
-            dialog.showMessageBox(mainWindow, {
-                type: 'question',
-                buttons: ['Yes, Exit', 'Cancel'],
-                defaultId: 1, // Default to Cancel
-                cancelId: 1,
-                title: 'Exit ProctorX',
-                message: 'Are you sure you want to exit application?',
-                detail: 'This will close the application completely and you will need to restart it to continue.'
-            }).then((result) => {
-                if (result.response === 0) { // User clicked "Yes, Exit"
-                    app.exit(0);
-                }
-            }).catch((err) => {
-                console.error('Error showing exit dialog:', err);
-                app.exit(0);
-            });
-        } else {
-            app.exit(0);
-        }
-    });
-});
-app.whenReady().then(() => {
-    app.setAsDefaultProtocolClient('proctorx');
+app.setAsDefaultProtocolClient('proctorx');
 
-    app.on('activate', () => {
-        // Don't create new windows on activate - let the app stay closed
-        // if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
-
+app.on('activate', () => {
+    // Don't create new windows on activate - let the app stay closed
+    // if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 // Handle second-instance (for Windows)
@@ -367,4 +369,78 @@ ipcMain.on('quit-app', () => {
 
 })
 
-app.whenReady().then(createWindow)
+// Monitor display changes
+function setupDisplayMonitoring() {
+    // Listen for display added/removed events
+    screen.on('display-added', (event, newDisplay) => {
+        const displays = screen.getAllDisplays();
+        console.log(`Display added. Total displays: ${displays.length}`);
+        if (displays.length >= 2 && mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                buttons: ['OK'],
+                defaultId: 0,
+                title: 'Multiple Displays Detected',
+                message: `Warning: ${displays.length} display(s) detected`,
+                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
+            }).catch((err) => {
+                console.error('Error showing display warning dialog:', err);
+            });
+        }
+    });
+
+    screen.on('display-removed', (event, oldDisplay) => {
+        const displays = screen.getAllDisplays();
+        console.log(`Display removed. Total displays: ${displays.length}`);
+    });
+
+    screen.on('display-metrics-changed', (event, display, changedMetrics) => {
+        const displays = screen.getAllDisplays();
+        console.log(`Display metrics changed. Total displays: ${displays.length}`);
+        if (displays.length >= 2 && mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+                type: 'warning',
+                buttons: ['OK'],
+                defaultId: 0,
+                title: 'Multiple Displays Detected',
+                message: `Warning: ${displays.length} display(s) detected`,
+                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
+            }).catch((err) => {
+                console.error('Error showing display warning dialog:', err);
+            });
+        }
+    });
+}
+
+app.whenReady().then(() => {
+    // Setup display monitoring
+    setupDisplayMonitoring();
+
+    // Register global shortcut for exit
+    globalShortcut.register('CommandOrControl+Shift+Q', () => {
+        // Show confirmation dialog before quitting
+        if (mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+                type: 'question',
+                buttons: ['Yes, Exit', 'Cancel'],
+                defaultId: 1, // Default to Cancel
+                cancelId: 1,
+                title: 'Exit ProctorX',
+                message: 'Are you sure you want to exit application?',
+                detail: 'This will close the application completely and you will need to restart it to continue.'
+            }).then((result) => {
+                if (result.response === 0) { // User clicked "Yes, Exit"
+                    app.exit(0);
+                }
+            }).catch((err) => {
+                console.error('Error showing exit dialog:', err);
+                app.exit(0);
+            });
+        } else {
+            app.exit(0);
+        }
+    });
+
+    // Create the main window
+    createWindow();
+})
