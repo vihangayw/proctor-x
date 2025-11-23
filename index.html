@@ -88,6 +88,29 @@
         -ms-user-select: none !important;
         user-select: none !important;
     }
+
+    /* Error message overlay */
+    #lmsError {
+        display: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(2, 69, 101, 0.95);
+        color: white;
+        padding: 40px 60px;
+        border-radius: 12px;
+        font-size: 24px;
+        font-weight: 600;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+        border: 2px solid #93ba49;
+    }
+
+    .content-container {
+        position: relative;
+    }
   </style>
 </head>
 <body>
@@ -98,6 +121,7 @@
 </div>
 
 <div class="content-container">
+  <div id="lmsError">LMS is offline</div>
   <iframe id="lmsFrame"
           allowfullscreen
           allow="camera; microphone; fullscreen; display-capture; autoplay; encrypted-media; picture-in-picture"

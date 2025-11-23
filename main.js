@@ -138,6 +138,23 @@ function createWindow() {
             event.preventDefault();
         }
     });
+    
+    // Handle failed loads (including iframe errors)
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        // Only handle main frame errors, iframe errors are handled in renderer
+        if (isMainFrame) {
+            console.error('Main frame failed to load:', errorCode, errorDescription, validatedURL);
+        }
+    });
+
+    // Listen for console errors from renderer (including iframe errors)
+    mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        if (level === 2 && (message.includes('ERR_CONNECTION_REFUSED') || message.includes('Failed to load URL'))) { // level 2 = error
+            console.error('Connection error detected:', message);
+            mainWindow.webContents.send('lms-connection-error', { message: 'LMS is offline' });
+        }
+    });
+
     mainWindow.webContents.session.setPermissionCheckHandler(() => true);
     mainWindow.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
         if (permission === 'media' || permission === 'display-capture') cb(true);
@@ -180,11 +197,12 @@ app.on('open-url', (event, url) => {
         const parts = parsed.pathname.split('/').filter(Boolean); // Remove empty strings
         console.log('URL parts:', parts);
 
-        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId']
+        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
         // The 'e-quiz' is part of the hostname, not pathname
-        if (parts.length >= 5) {
-            const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
-            deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId };
+        // examType is either 'resit' or 'exam'
+        if (parts.length >= 6) {
+            const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
+            deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId, examType };
             console.log('Parsed deeplink data:', deeplinkData);
 
             if (mainWindow) {
@@ -216,7 +234,7 @@ app.on('open-url', (event, url) => {
                 console.error('Main window not found');
             }
         } else {
-            console.error('Invalid URL structure. Expected: proctorx://e-quiz/quizId/studentId/sequence/token/sqid');
+            console.error('Invalid URL structure. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
         }
     } catch (err) {
         console.error('Invalid URL:', err);
@@ -263,11 +281,12 @@ app.on('second-instance', (event, argv) => {
             const parts = u.pathname.split('/').filter(Boolean);
             console.log('Second instance URL parts:', parts);
 
-            // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId']
+            // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
             // The 'e-quiz' is part of the hostname, not pathname
-            if (parts.length >= 5) {
-                const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
-                deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId };
+            // examType is either 'resit' or 'exam'
+            if (parts.length >= 6) {
+                const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
+                deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId, examType };
                 console.log('Second instance parsed deeplink data:', deeplinkData);
 
                 if (mainWindow) {
@@ -297,7 +316,7 @@ app.on('second-instance', (event, argv) => {
                     console.error('Main window not found in second instance');
                 }
             } else {
-                console.error('Invalid URL structure in second instance. Expected: proctorx://e-quiz/quizId/studentId/sequence/token/sqid');
+                console.error('Invalid URL structure in second instance. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
             }
         } catch (err) {
             console.error('Invalid URL in second instance:', err);

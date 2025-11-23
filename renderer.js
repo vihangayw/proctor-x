@@ -20,7 +20,7 @@ let uploadInterval = null;
 
 const CONFIG = {
     BASE_API_URL: 'http://localhost:8383/api/v1',
-    BASE_LMS_URL: 'http://localhost:3000/lms-mc',
+    BASE_LMS_URL: 'http://localhost:3001/lms-mc',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
     BASE_LANDING: './landing.html'
 };
@@ -1016,15 +1016,58 @@ window.electronAPI.onLaunchData(async (data) => {
     console.info("🚀 onLaunchData received!");
     console.log('📊 Got launch data:', data);
 
-    const { quizId, studentId, tkn, sqid } = data;
-    console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid });
+    const { quizId, studentId, tkn, sqid, examType } = data;
+    console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid, examType, examTypeType: typeof examType });
+    console.log('📋 Full data object:', JSON.stringify(data, null, 2));
 
     const iframe = document.getElementById('lmsFrame');
-    const examUrl = `${CONFIG.BASE_LMS_URL}/exam-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
+    const errorMessage = document.getElementById('lmsError');
+    
+    // Hide error message initially
+    if (errorMessage) {
+        errorMessage.style.display = 'none';
+    }
+    
+    // Use resit-preview if examType is 'resit', otherwise use exam-preview
+    const normalizedExamType = examType ? String(examType).trim().toLowerCase() : 'exam';
+    const previewPath = normalizedExamType === 'resit' ? 'resit-preview' : 'exam-preview';
+    const examUrl = `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}`;
     console.log('🌐 Loading exam URL:', examUrl);
+
+    // Set up error handling for iframe
+    let loadTimeout;
+    let hasLoaded = false;
+
+    // Handle successful load
+    const handleLoad = () => {
+        hasLoaded = true;
+        if (loadTimeout) {
+            clearTimeout(loadTimeout);
+        }
+        if (errorMessage) {
+            errorMessage.style.display = 'none';
+        }
+    };
+
+    // Handle load error with timeout
+    const handleError = () => {
+        if (!hasLoaded && errorMessage) {
+            errorMessage.style.display = 'block';
+            iframe.style.display = 'none';
+        }
+    };
+
+    // Set timeout to detect connection errors (5 seconds)
+    loadTimeout = setTimeout(() => {
+        if (!hasLoaded) {
+            console.error('❌ Iframe load timeout - LMS connection failed');
+            handleError();
+        }
+    }, 5000);
 
     // Re-apply Tab key blocking when iframe loads new content
     iframe.addEventListener('load', () => {
+        handleLoad();
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
             if (iframeDoc) {
@@ -1053,10 +1096,56 @@ window.electronAPI.onLaunchData(async (data) => {
         }
     }, { once: true });
 
+    // Listen for iframe error events
+    iframe.addEventListener('error', (e) => {
+        console.error('❌ Iframe error event:', e);
+        handleError();
+    });
+
+    // Try to detect connection errors by checking iframe content
+    // Note: This may not work for cross-origin iframes due to CORS
+    iframe.addEventListener('load', () => {
+        // Additional check after load - verify if we can access the content
+        setTimeout(() => {
+            try {
+                // Try to access iframe content to verify it loaded
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (!iframeDoc || iframeDoc.location.href === 'about:blank') {
+                    console.error('❌ Iframe appears to have failed loading');
+                    handleError();
+                }
+            } catch (e) {
+                // Cross-origin - can't check, assume it loaded if we got here
+                console.log('Cannot verify iframe content (cross-origin), assuming loaded');
+            }
+        }, 1000);
+    }, { once: true });
+
+    // Listen for connection errors from main process
+    if (window.electronAPI && window.electronAPI.onLmsConnectionError) {
+        window.electronAPI.onLmsConnectionError((data) => {
+            console.error('❌ LMS connection error received from main process:', data);
+            handleError();
+        });
+    }
+
+    // Override console.error to catch ERR_CONNECTION_REFUSED
+    const originalConsoleError = console.error;
+    console.error = function(...args) {
+        originalConsoleError.apply(console, args);
+        const errorMessage = args.join(' ');
+        if (errorMessage.includes('ERR_CONNECTION_REFUSED') || 
+            errorMessage.includes('Failed to load URL') ||
+            errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
+            console.log('🔍 Detected connection error in console');
+            handleError();
+        }
+    };
+
     iframe.src = examUrl;
 
     console.log('🔍 Getting exam info...');
-    const examInfo = await getExamInfo(quizId, tkn); // ✅ await here
+    const examInfo = await getExamInfo(quizId, tkn, examType); // ✅ await here
     if (examInfo) {
         console.log('📺 Exam requirements:', {
             shareScreen: examInfo.shareScreen,
@@ -1111,9 +1200,16 @@ const getStudentInfo = async (spid, tkn, quizId, examInfo, sqid) => {
     }
 }
 
-const getExamInfo = async (qid, tkn) => {
+const getExamInfo = async (qid, tkn, examType = 'exam') => {
     try {
-        const response = await fetch(`${CONFIG.BASE_API_URL}/vle/quiz/exam/${qid}`, {
+        // Use resit endpoint if examType is 'resit', otherwise use exam endpoint
+        // Normalize examType: trim whitespace and convert to lowercase for comparison
+        const normalizedExamType = examType ? String(examType).trim().toLowerCase() : 'exam';
+        console.log('🔍 getExamInfo called with:', { qid, examType, normalizedExamType, examTypeType: typeof examType });
+        const endpoint = normalizedExamType === 'resit' ? 'resit' : 'exam';
+        const apiUrl = `${CONFIG.BASE_API_URL}/vle/quiz/${endpoint}/${qid}`;
+        console.log('🌐 Calling API:', apiUrl);
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Authorization': 'Bearer ' + tkn
@@ -1183,7 +1279,8 @@ const uploadScreenCapture = async (sqid) => {
 
     const allowedPhrases = [
         '/e-quiz/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
-        '/e-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
+        '/e-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
+         '/r-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
     ];
 
     const shouldUpload = allowedPhrases.some(phrase => currentUrl.includes(phrase));
@@ -1203,7 +1300,7 @@ const uploadScreenCapture = async (sqid) => {
         await video.play();
 
         const canvas = document.createElement('canvas');
-        const scaleFactor = 1.15;
+        const scaleFactor = 1.55;
         canvas.width = video.videoWidth * scaleFactor;
         canvas.height = video.videoHeight * scaleFactor;
         const ctx = canvas.getContext('2d');
