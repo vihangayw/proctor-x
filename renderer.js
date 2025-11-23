@@ -163,11 +163,21 @@ const openScreenShare = async (quizId, examInfo, sqid) => {
         console.log('🔗 Starting LiveKit connection...');
         // await connectToLiveKit(stream, quizId, examInfo);
 
-        // Start screen capture upload
-        if (uploadInterval) clearInterval(uploadInterval);
-        uploadInterval = setInterval(() => {
-            uploadScreenCapture(sqid);
-        }, 10000);
+        // Start screen capture upload only if shareScreen is true
+        if (examInfo?.shareScreen) {
+            console.log('📸 Starting screen capture upload (shareScreen is enabled)');
+            if (uploadInterval) clearInterval(uploadInterval);
+            uploadInterval = setInterval(() => {
+                uploadScreenCapture(sqid);
+            }, 10000);
+        } else {
+            console.log('⏭️ Skipping screen capture upload (shareScreen is disabled)');
+            // Clear any existing interval if shareScreen is disabled
+            if (uploadInterval) {
+                clearInterval(uploadInterval);
+                uploadInterval = null;
+            }
+        }
 
     } catch (err) {
         console.error('Error sharing screen:', err);
