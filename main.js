@@ -1,12 +1,13 @@
-const {app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen} = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen } = require('electron')
 const path = require('path')
 const remoteMain = require('@electron/remote/main');
-const {globalShortcut} = require('electron');
+const { globalShortcut } = require('electron');
 
 // Enable screen capture in Electron
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
 app.commandLine.appendSwitch('allow-http-screen-capture')
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+app.commandLine.appendSwitch('disable-site-isolation-trials')
 
 let mainWindow
 
@@ -35,8 +36,8 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        alwaysOnTop: true, // Keep window on top of others
+        // kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        // alwaysOnTop: true, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
@@ -106,7 +107,7 @@ function createWindow() {
                 console.error('Error showing display warning dialog:', err);
             });
         }
-        
+
         if (deeplinkData) {
             console.log('Found deeplink data, sending to renderer...');
             mainWindow.webContents.send('launch-data', deeplinkData);
@@ -125,7 +126,7 @@ function createWindow() {
             event.preventDefault();
             return;
         }
-        
+
         // Block Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS
         const devToolShortcuts = (
             (input.key === 'I' && input.control && input.shift) || // Ctrl+Shift+I
@@ -183,9 +184,9 @@ app.on('open-url', (event, url) => {
         // The 'e-quiz' is part of the hostname, not pathname
         if (parts.length >= 5) {
             const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
-            deeplinkData = {quizId, studentId, tkn, sqid: studentQuizId};
+            deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId };
             console.log('Parsed deeplink data:', deeplinkData);
-            
+
             if (mainWindow) {
                 console.log('Main window found, sending data...');
                 // Focus the window
@@ -230,7 +231,7 @@ app.on('web-contents-created', (_, contents) => {
             event.preventDefault();
         }
     });
-    
+
     contents.session.setPermissionCheckHandler((webContents, permission) => {
         // if (permission === 'display-capture') return true;
         return true;
@@ -266,7 +267,7 @@ app.on('second-instance', (event, argv) => {
             // The 'e-quiz' is part of the hostname, not pathname
             if (parts.length >= 5) {
                 const [hardcodedId, quizId, studentId, tkn, studentQuizId] = parts;
-                deeplinkData = {quizId, studentId, tkn, sqid: studentQuizId};
+                deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId };
                 console.log('Second instance parsed deeplink data:', deeplinkData);
 
                 if (mainWindow) {
@@ -305,13 +306,13 @@ app.on('second-instance', (event, argv) => {
 });
 // Handle getting screen sources
 ipcMain.handle('get-sources', async () => {
-    return await desktopCapturer.getSources({types: ['window', 'screen']})
+    return await desktopCapturer.getSources({ types: ['window', 'screen'] })
 })
 
 // Handle getting display media stream
 ipcMain.handle('get-display-media', async () => {
     try {
-        const sources = await desktopCapturer.getSources({types: ['screen']});
+        const sources = await desktopCapturer.getSources({ types: ['screen'] });
         if (sources.length === 0) {
             throw new Error('No screen sources available');
         }
@@ -398,16 +399,16 @@ function setupDisplayMonitoring() {
         const displays = screen.getAllDisplays();
         console.log(`Display metrics changed. Total displays: ${displays.length}`);
         if (displays.length >= 2 && mainWindow) {
-            dialog.showMessageBox(mainWindow, {
-                type: 'warning',
-                buttons: ['OK'],
-                defaultId: 0,
-                title: 'Multiple Displays Detected',
-                message: `Warning: ${displays.length} display(s) detected`,
-                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
-            }).catch((err) => {
-                console.error('Error showing display warning dialog:', err);
-            });
+            // dialog.showMessageBox(mainWindow, {
+            //     type: 'warning',
+            //     buttons: ['OK'],
+            //     defaultId: 0,
+            //     title: 'Multiple Displays Detected',
+            //     message: `Warning: ${displays.length} display(s) detected`,
+            //     detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
+            // }).catch((err) => {
+            //     console.error('Error showing display warning dialog:', err);
+            // });
         }
     });
 }

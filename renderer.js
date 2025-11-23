@@ -1,7 +1,7 @@
 // import * as LiveKit from 'livekit-client';
 
 // LiveKit will be imported dynamically
-import {createLocalScreenTracks, LocalVideoTrack} from "./livekit-client.esm.mjs";
+import { createLocalScreenTracks, LocalVideoTrack } from "./livekit-client.esm.mjs";
 
 let LiveKit = null;
 
@@ -16,6 +16,7 @@ let stream = null
 let room = null
 let livekitRoom = null
 let livekitConnected = false
+let uploadInterval = null;
 
 const CONFIG = {
     BASE_API_URL: 'http://localhost:8383/api/v1',
@@ -33,7 +34,7 @@ const LIVEKIT_CONFIG = {
     participantName: 'Screen Sharer'
 };
 
-const openScreenShare = async (quizId, examInfo) => {
+const openScreenShare = async (quizId, examInfo, sqid) => {
     console.info('openScreenShare')
     try {
         const sources = await window.electronAPI.getSources();
@@ -117,12 +118,17 @@ const openScreenShare = async (quizId, examInfo) => {
             shareScreenBtn.disabled = false;
             stopShareBtn.disabled = true;
 
+            if (uploadInterval) {
+                clearInterval(uploadInterval);
+                uploadInterval = null;
+            }
+
             // Disconnect from LiveKit
-            await disconnectFromLiveKit();
+            // await disconnectFromLiveKit();
 
             // Optionally, notify backend or clean up resources
             // 🔁 Restart screen sharing
-            openScreenShare(quizId);
+            openScreenShare(quizId, examInfo, sqid);
         });
 
         // screenView.srcObject = stream;
@@ -155,7 +161,13 @@ const openScreenShare = async (quizId, examInfo) => {
         // === LiveKit Integration ===
         // Connect to LiveKit for screen sharing
         console.log('🔗 Starting LiveKit connection...');
-        await connectToLiveKit(stream, quizId, examInfo);
+        // await connectToLiveKit(stream, quizId, examInfo);
+
+        // Start screen capture upload
+        if (uploadInterval) clearInterval(uploadInterval);
+        uploadInterval = setInterval(() => {
+            uploadScreenCapture(sqid);
+        }, 10000);
 
     } catch (err) {
         console.error('Error sharing screen:', err);
@@ -172,7 +184,7 @@ shareScreenBtn.addEventListener('click', async () => {
             camera: true,
             qname: 'Test Exam'
         };
-        await openScreenShare('9026', mockExamInfo);
+        await openScreenShare('9026', mockExamInfo, '1');
     } catch (error) {
         console.error('Error starting screen share:', error);
         if (error.name === 'InvalidStateError') {
@@ -242,7 +254,7 @@ const connectToLiveKit = async (screenStream, quizId, examInfo) => {
                 simulcast: true
             },
             videoCaptureDefaults: {
-                resolution: {width: 960, height: 540}
+                resolution: { width: 960, height: 540 }
             }
         };
 
@@ -393,9 +405,9 @@ const shareCameraFeed = async (room) => {
         // Get camera stream with reduced quality
         const cameraStream = await navigator.mediaDevices.getUserMedia({
             video: {
-                width: {ideal: 320, max: 640},
-                height: {ideal: 240, max: 480},
-                frameRate: {ideal: 10, max: 15}
+                width: { ideal: 320, max: 640 },
+                height: { ideal: 240, max: 480 },
+                frameRate: { ideal: 10, max: 15 }
             },
             audio: false // We'll handle audio separately if needed
         });
@@ -451,7 +463,7 @@ const shareCameraFeed = async (room) => {
 const shareScreenFeed = async (room, screenStream) => {
     try {
         console.log('🖥️ Setting up screen sharing...');
-        
+
         // Log screen stream details
         console.log('🎥 Screen stream details:', {
             id: screenStream.id,
@@ -598,11 +610,11 @@ const renderParticipant = (participant) => {
     participantDiv.style.cssText = `
         width: 300px;
         height: 200px;
-        background: #333;
+        background: #024565;
         border-radius: 8px;
         position: relative;
         overflow: hidden;
-        border: 2px solid #4CAF50;
+        border: 2px solid #93ba49;
     `;
 
     const nameDiv = document.createElement('div');
@@ -641,11 +653,11 @@ const renderLocalParticipant = (participant, screenTrack, cameraTrack) => {
     screenDiv.style.cssText = `
         width: 300px;
         height: 200px;
-        background: #333;
+        background: #024565;
         border-radius: 8px;
         position: relative;
         overflow: hidden;
-        border: 2px solid #FF9800;
+        border: 2px solid #93ba49;
     `;
 
     const screenNameDiv = document.createElement('div');
@@ -699,11 +711,11 @@ const renderLocalParticipant = (participant, screenTrack, cameraTrack) => {
     cameraDiv.style.cssText = `
         width: 200px;
         height: 150px;
-        background: #333;
+        background: #024565;
         border-radius: 8px;
         position: relative;
         overflow: hidden;
-        border: 2px solid #2196F3;
+        border: 2px solid #93ba49;
     `;
 
     const cameraNameDiv = document.createElement('div');
@@ -820,7 +832,7 @@ const disconnectFromLiveKit = async () => {
                 livekitRoom.cameraStream.getTracks().forEach(track => track.stop());
                 livekitRoom.cameraStream = null;
             }
-            
+
             await livekitRoom.disconnect();
         } catch (error) {
             console.error('❌ Error disconnecting from LiveKit:', error);
@@ -830,8 +842,12 @@ const disconnectFromLiveKit = async () => {
 
 stopShareBtn.addEventListener('click', async () => {
     if (stream) {
+        if (uploadInterval) {
+            clearInterval(uploadInterval);
+            uploadInterval = null;
+        }
         // Disconnect from LiveKit first (this will also stop camera stream)
-        await disconnectFromLiveKit();
+        // await disconnectFromLiveKit();
 
         // Stop screen sharing stream
         stream.getTracks().forEach(track => track.stop())
@@ -846,7 +862,7 @@ stopShareBtn.addEventListener('click', async () => {
 
 // Close LiveKit room button
 document.getElementById('closeLivekit').addEventListener('click', async () => {
-    await disconnectFromLiveKit();
+    // await disconnectFromLiveKit();
 });
 
 document.getElementById('exitApp').addEventListener('click', async () => {
@@ -1000,8 +1016,8 @@ window.electronAPI.onLaunchData(async (data) => {
     console.info("🚀 onLaunchData received!");
     console.log('📊 Got launch data:', data);
 
-    const {quizId, studentId, tkn, sqid} = data;
-    console.log('📋 Extracted parameters:', {quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid});
+    const { quizId, studentId, tkn, sqid } = data;
+    console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid });
 
     const iframe = document.getElementById('lmsFrame');
     const examUrl = `${CONFIG.BASE_LMS_URL}/exam-preview/${quizId}/${tkn}/${studentId}/${sqid}`;
@@ -1035,7 +1051,7 @@ window.electronAPI.onLaunchData(async (data) => {
             // Cross-origin iframe - can't access content
             console.log('Iframe is cross-origin, using global handlers only');
         }
-    }, {once: true});
+    }, { once: true });
 
     iframe.src = examUrl;
 
@@ -1049,7 +1065,7 @@ window.electronAPI.onLaunchData(async (data) => {
 
         if (examInfo.shareScreen || examInfo.camera) {
             console.log('👤 Getting student info...');
-            getStudentInfo(studentId, tkn, quizId, examInfo);
+            getStudentInfo(studentId, tkn, quizId, examInfo, sqid);
         } else {
             console.log('ℹ️ No screen sharing or camera required for this exam');
         }
@@ -1059,7 +1075,7 @@ window.electronAPI.onLaunchData(async (data) => {
 });
 
 
-const getStudentInfo = async (spid, tkn, quizId, examInfo) => {
+const getStudentInfo = async (spid, tkn, quizId, examInfo, sqid) => {
     try {
         const response = await fetch(`${CONFIG.BASE_API_URL}/vle/student/get-login/${spid}`, {
             method: 'POST',
@@ -1073,14 +1089,23 @@ const getStudentInfo = async (spid, tkn, quizId, examInfo) => {
         }
 
         const res = await response.json();
+        console.log('👤 Student login response:', res);
         const userData = res.data;
+        console.log('👤 User data:', userData);
 
-        const userToken = "Bearer " + userData.message;
+        // Check what property holds the token
+        if (!userData.message) {
+            console.warn('⚠️ userData.message is undefined. Available keys:', Object.keys(userData));
+        }
+
+        const userToken = "Bearer " + res.message;
+        console.log('🔑 Generated user token:', userToken);
+
         localStorage.setItem('user_token', userToken);
         localStorage.setItem('user_details', JSON.stringify(userData));
         localStorage.setItem('ws_token', userData.wsToken);
 
-        openScreenShare(quizId, examInfo);
+        openScreenShare(quizId, examInfo, sqid);
     } catch (error) {
         console.error('Error calling login API:', error);
     }
@@ -1113,5 +1138,108 @@ const getExamInfo = async (qid, tkn) => {
     } catch (error) {
         console.error('Error calling exam info API:', error);
         return null;
+    }
+}
+
+function dataURLtoBlob(dataurl) {
+    var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+}
+
+const uploadScreenCapture = async (sqid) => {
+    // console.log('📸 uploadScreenCapture called with sqid:', sqid);
+
+    if (!stream) {
+        // console.log('❌ No stream available');
+        return;
+    }
+
+    if (!stream.active) {
+        // console.log('❌ Stream is not active');
+        return;
+    }
+
+    const iframe = document.getElementById('lmsFrame');
+    if (!iframe) {
+        // console.log('❌ iframe not found');
+        return;
+    }
+
+    let currentUrl = iframe.src;
+    try {
+        // Try to get the actual current URL of the iframe (if same origin or allowed)
+        if (iframe.contentWindow && iframe.contentWindow.location && iframe.contentWindow.location.href) {
+            currentUrl = iframe.contentWindow.location.href;
+        }
+    } catch (e) {
+        console.log('⚠️ Could not access iframe internal location (likely CORS):', e.message);
+    }
+
+    // console.log('🔗 Current iframe URL (checked):', currentUrl);
+
+    const allowedPhrases = [
+        '/e-quiz/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
+        '/e-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
+    ];
+
+    const shouldUpload = allowedPhrases.some(phrase => currentUrl.includes(phrase));
+    // console.log('❓ Should upload?', shouldUpload);
+
+    if (!shouldUpload) {
+        // console.log('⏭️ Skipping upload - URL does not match allowed phrases');
+        return;
+    }
+
+    try {
+        // console.log('🎥 Capturing frame from stream...');
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.muted = true;
+        video.srcObject = stream;
+        await video.play();
+
+        const canvas = document.createElement('canvas');
+        const scaleFactor = 1.15;
+        canvas.width = video.videoWidth * scaleFactor;
+        canvas.height = video.videoHeight * scaleFactor;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/webp');
+        // console.log('🖼️ Frame captured, data URL length:', dataUrl.length);
+
+        const blob = dataURLtoBlob(dataUrl);
+        // console.log('📦 Blob created, size:', blob.size, 'type:', blob.type);
+
+        // Cleanup video
+        video.srcObject = null;
+        video.remove();
+
+        let formData = new FormData();
+        formData.append("image", blob, "frame.webp");
+        formData.append("sqid", sqid + '');
+
+        // console.log('🚀 Sending upload request to:', `${CONFIG.BASE_API_URL}/vle/quiz/pic`);
+        const response = await fetch(`${CONFIG.BASE_API_URL}/vle/quiz/pic`, {
+            method: 'POST',
+            headers: {
+                'Authorization': localStorage.getItem('user_token')
+            },
+            body: formData
+        });
+
+        // console.log('✅ Upload response status:', response.status);
+        if (!response.ok) {
+            console.error('❌ Upload failed with status text:', response.statusText);
+        } else {
+            // console.log('✅ Upload successful');
+        }
+    } catch (e) {
+        // alert('Error uploading screen capture: ' + e);
+        console.error('❌ Screen upload error:', e);
     }
 }
