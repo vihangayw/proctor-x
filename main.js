@@ -100,32 +100,62 @@ function createWindow() {
                 // Set fullscreen and hide taskbar before showing window
                 mainWindow.setSkipTaskbar(true);
                 mainWindow.setFullScreen(true);
-                
-                // Use multiple attempts to ensure taskbar is hidden
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.setFullScreen(true);
-                        // const primaryDisplay = screen.getPrimaryDisplay();
-                        // mainWindow.setBounds(primaryDisplay.bounds);
-                    }
-                }, 100);
+                mainWindow.setAlwaysOnTop(true);
             }
             
             mainWindow.show();
             mainWindow.focus();
             
             // Additional Windows-specific setup after window is shown
+            // Use multiple attempts to ensure taskbar is hidden and window is on top
             if (process.platform === 'win32') {
+                // Immediate setup - right after show()
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.setSkipTaskbar(true);
+                    mainWindow.setFullScreen(true);
+                    mainWindow.setAlwaysOnTop(true);
+                    mainWindow.focus();
+                }
+                
+                // First attempt after a brief delay
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(true);
                         mainWindow.setFullScreen(true);
                         mainWindow.setAlwaysOnTop(true);
-                        // const primaryDisplay = screen.getPrimaryDisplay();
-                        // mainWindow.setBounds(primaryDisplay.bounds);
+                        mainWindow.focus();
                     }
-                }, 300);
+                }, 50);
+                
+                // Second attempt to ensure it sticks
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setSkipTaskbar(true);
+                        mainWindow.setFullScreen(true);
+                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.focus();
+                    }
+                }, 200);
+                
+                // Third attempt for stubborn cases
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setSkipTaskbar(true);
+                        mainWindow.setFullScreen(true);
+                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.focus();
+                    }
+                }, 500);
+                
+                // Fourth attempt for very stubborn cases
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setSkipTaskbar(true);
+                        mainWindow.setFullScreen(true);
+                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.focus();
+                    }
+                }, 1000);
             }
         }
     });
@@ -222,7 +252,18 @@ function createWindow() {
                 }
             });
             
-            // Keep window always on top and hide taskbar (start after a delay to ensure window is fully ready)
+            // Keep window always on top and hide taskbar (start immediately to ensure proper initial state)
+            // Start checking right away, but also set up immediately
+            if (process.platform === 'win32') {
+                // Immediate check and setup
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.setSkipTaskbar(true);
+                    mainWindow.setFullScreen(true);
+                    mainWindow.setAlwaysOnTop(true);
+                    mainWindow.focus();
+                }
+            }
+            
             setTimeout(() => {
                 focusInterval = setInterval(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -263,7 +304,7 @@ function createWindow() {
                         }
                     }
                 }, 500); // Check every 500ms (more aggressive to prevent taskbar access)
-            }, 1000); // Wait 1 second before starting
+            }, 100); // Start checking after 100ms (reduced from 1000ms for faster initial setup)
         });
         
         // Additional aggressive blocking: Monitor for Windows key presses at lower level
@@ -275,7 +316,9 @@ function createWindow() {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         try {
                             // Continuously ensure window is on top and taskbar is hidden
-                            // mainWindow.setSkipTaskbar(true);
+                            if (process.platform === 'win32') {
+                                mainWindow.setSkipTaskbar(true);
+                            }
                             
                             // If window loses focus (e.g., Start menu opened), immediately refocus
                             // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
@@ -306,34 +349,35 @@ function createWindow() {
                                 } else {
                                     // If dialog was shown recently, just refocus without showing another dialog
                                     mainWindow.focus();
-                                    // mainWindow.setAlwaysOnTop(true);
-                                    // Force fullscreen to close any overlays
-                                    // if (!mainWindow.isFullScreen()) {
-                                    //     mainWindow.setFullScreen(true);
-                                    // }
+                                    if (process.platform === 'win32') {
+                                        mainWindow.setAlwaysOnTop(true);
+                                        // Force fullscreen to close any overlays
+                                        if (!mainWindow.isFullScreen()) {
+                                            mainWindow.setFullScreen(true);
+                                        }
+                                    }
                                 }
                             }
                             
                             // Ensure window covers full screen and taskbar is hidden
-                            const primaryDisplay = screen.getPrimaryDisplay();
-                            const currentBounds = mainWindow.getBounds();
-                            const screenBounds = primaryDisplay.bounds;
-                            
-                            // Always ensure taskbar is hidden
-                            // mainWindow.setSkipTaskbar(true);
-                            
-                            // Ensure window covers entire screen including taskbar area
-                            if (currentBounds.width !== screenBounds.width || 
-                                currentBounds.height !== screenBounds.height ||
-                                currentBounds.x !== screenBounds.x ||
-                                currentBounds.y !== screenBounds.y) {
-                                // mainWindow.setBounds(screenBounds);
+                            if (process.platform === 'win32') {
+                                const primaryDisplay = screen.getPrimaryDisplay();
+                                const currentBounds = mainWindow.getBounds();
+                                const screenBounds = primaryDisplay.bounds;
+                                
+                                // Always ensure taskbar is hidden
+                                mainWindow.setSkipTaskbar(true);
+                                
+                                // Ensure fullscreen is maintained
+                                if (!mainWindow.isFullScreen()) {
+                                    mainWindow.setFullScreen(true);
+                                }
+                                
+                                // Ensure always on top is maintained
+                                if (!mainWindow.isAlwaysOnTop()) {
+                                    mainWindow.setAlwaysOnTop(true);
+                                }
                             }
-                            
-                            // Ensure fullscreen is maintained
-                            // if (!mainWindow.isFullScreen()) {
-                            //     mainWindow.setFullScreen(true);
-                            // }
                         } catch (error) {
                             // Silently handle errors to avoid console spam
                         }
@@ -344,7 +388,7 @@ function createWindow() {
                 
                 // Store interval for cleanup
                 mainWindow._aggressiveFocusInterval = aggressiveFocusInterval;
-            }, 1500); // Wait 1.5 seconds after window is ready before starting aggressive monitoring
+            }, 200); // Start aggressive monitoring after 200ms (reduced from 1500ms for faster response)
         });
         
         // Clean up intervals on window close
