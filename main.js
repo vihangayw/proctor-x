@@ -20,7 +20,6 @@ function createWindow() {
     let iconPath;
     const platform = process.platform;
 
-
     if (platform === 'win32') {
         iconPath = path.join(__dirname, 'assets', 'icon.ico');
     } else if (platform === 'darwin') {
@@ -36,8 +35,8 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        // kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        // alwaysOnTop: true, // Keep window on top of others
+        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: true, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
@@ -86,6 +85,51 @@ function createWindow() {
         mainWindow.webContents.openDevTools()
     }
     mainWindow.setMenu(null) // Remove menu bar
+    
+    // Windows-specific: Hide from taskbar and set additional properties
+    if (process.platform === 'win32') {
+        // Hide window from taskbar immediately
+        mainWindow.setSkipTaskbar(true);
+    }
+    
+    // Ensure window is shown (important for kiosk mode on Windows)
+    mainWindow.once('ready-to-show', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            // Windows-specific: Ensure fullscreen and hide taskbar BEFORE showing
+            if (process.platform === 'win32') {
+                // Set fullscreen and hide taskbar before showing window
+                mainWindow.setSkipTaskbar(true);
+                mainWindow.setFullScreen(true);
+                
+                // Use multiple attempts to ensure taskbar is hidden
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setSkipTaskbar(true);
+                        mainWindow.setFullScreen(true);
+                        // const primaryDisplay = screen.getPrimaryDisplay();
+                        // mainWindow.setBounds(primaryDisplay.bounds);
+                    }
+                }, 100);
+            }
+            
+            mainWindow.show();
+            mainWindow.focus();
+            
+            // Additional Windows-specific setup after window is shown
+            if (process.platform === 'win32') {
+                setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setSkipTaskbar(true);
+                        mainWindow.setFullScreen(true);
+                        mainWindow.setAlwaysOnTop(true);
+                        // const primaryDisplay = screen.getPrimaryDisplay();
+                        // mainWindow.setBounds(primaryDisplay.bounds);
+                    }
+                }, 300);
+            }
+        }
+    });
+    
     mainWindow.loadFile('index.html')
 
 
@@ -96,16 +140,15 @@ function createWindow() {
         const displays = screen.getAllDisplays();
         console.log(`Detected ${displays.length} display(s)`);
         if (displays.length >= 2) {
-            dialog.showMessageBox(mainWindow, {
-                type: 'warning',
-                buttons: ['OK'],
-                defaultId: 0,
-                title: 'Multiple Displays Detected',
-                message: `Warning: ${displays.length} display(s) detected`,
-                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
-            }).catch((err) => {
-                console.error('Error showing display warning dialog:', err);
-            });
+            // Show SweetAlert warning via IPC
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('show-sweetalert-warning', {
+                    title: 'Multiple Displays Detected',
+                    text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
+                    icon: 'warning',
+                    confirmButtonText: 'OK'
+                });
+            }
         }
 
         if (deeplinkData) {
@@ -120,6 +163,202 @@ function createWindow() {
     mainWindow.on('leave-full-screen', () => {
         mainWindow.setFullScreen(true)
     })
+    
+    // Windows-specific: Keep window focused and on top
+    if (process.platform === 'win32') {
+        let focusInterval = null;
+        // Store dialogShowing flag on mainWindow so it's accessible from all scopes
+        mainWindow._dialogShowing = false;
+        let lastBlurTime = 0; // Track when blur occurred
+        
+        // Wait for window to be ready before setting up focus management
+        mainWindow.once('ready-to-show', () => {
+            // Monitor window focus and keep it on top
+            mainWindow.on('blur', () => {
+                const now = Date.now();
+                lastBlurTime = now;
+                
+                // Show warning dialog if Windows key was likely pressed (window lost focus)
+                // Only show dialog if one isn't already showing and it's been at least 2 seconds since last dialog
+                if (!mainWindow._dialogShowing && (now - (mainWindow._lastDialogTime || 0)) > 2000) {
+                    mainWindow._dialogShowing = true;
+                    mainWindow._lastDialogTime = now;
+                    
+                    // Show warning dialog via SweetAlert
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('show-sweetalert-warning', {
+                            title: 'Unauthorized Action Detected',
+                            text: 'Windows key or unauthorized action detected. You are not allowed to access other applications or the Windows Start menu during the exam. Please remain focused on the exam application.',
+                            icon: 'warning',
+                            confirmButtonText: 'OK',
+                            allowOutsideClick: false,
+                            allowEscapeKey: false
+                        });
+                    }
+                    
+                    // Dialog close will be handled in renderer via IPC
+                    // Set a timeout to reset dialog flag after reasonable time
+                    setTimeout(() => {
+                        mainWindow._dialogShowing = false;
+                    }, 5000); // Reset after 5 seconds if not already reset
+                }
+                
+                // Immediately refocus the window if it loses focus (closes Start menu if opened)
+                // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
+                // Use multiple timeouts to catch different scenarios
+               
+            });
+            
+            // Prevent window from being minimized
+            mainWindow.on('minimize', (event) => {
+                event.preventDefault();
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    try {
+                        mainWindow.restore();
+                        mainWindow.focus();
+                    } catch (error) {
+                        console.error('Error restoring window:', error);
+                    }
+                }
+            });
+            
+            // Keep window always on top and hide taskbar (start after a delay to ensure window is fully ready)
+            setTimeout(() => {
+                focusInterval = setInterval(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        try {
+                            // Hide from taskbar continuously
+                            mainWindow.setSkipTaskbar(true);
+                            
+                            if (!mainWindow.isFocused()) {
+                                mainWindow.focus();
+                            }
+                            if (!mainWindow.isAlwaysOnTop()) {
+                                mainWindow.setAlwaysOnTop(true);
+                            }
+                            if (!mainWindow.isFullScreen()) {
+                                mainWindow.setFullScreen(true);
+                            }
+                            
+                            // Ensure window covers entire screen including taskbar area
+                            const primaryDisplay = screen.getPrimaryDisplay();
+                            const currentBounds = mainWindow.getBounds();
+                            const screenBounds = primaryDisplay.bounds;
+                            
+                            // If window doesn't cover full screen, resize it
+                            // if (currentBounds.width !== screenBounds.width || 
+                            //     currentBounds.height !== screenBounds.height ||
+                            //     currentBounds.x !== screenBounds.x ||
+                            //     currentBounds.y !== screenBounds.y) {
+                            //     mainWindow.setBounds(screenBounds);
+                            // }
+                        } catch (error) {
+                            console.error('Error maintaining window state:', error);
+                        }
+                    } else {
+                        // Clean up interval if window is destroyed
+                        if (focusInterval) {
+                            clearInterval(focusInterval);
+                            focusInterval = null;
+                        }
+                    }
+                }, 500); // Check every 500ms (more aggressive to prevent taskbar access)
+            }, 1000); // Wait 1 second before starting
+        });
+        
+        // Additional aggressive blocking: Monitor for Windows key presses at lower level
+        // This uses a very frequent check to catch Windows key usage and immediately refocus
+        // Set this up after window is ready
+        mainWindow.once('ready-to-show', () => {
+            setTimeout(() => {
+                const aggressiveFocusInterval = setInterval(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        try {
+                            // Continuously ensure window is on top and taskbar is hidden
+                            // mainWindow.setSkipTaskbar(true);
+                            
+                            // If window loses focus (e.g., Start menu opened), immediately refocus
+                            // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
+                            if (!mainWindow.isFocused() && !mainWindow._dialogShowing) {
+                                const now = Date.now();
+                                // Show dialog if focus was lost and enough time has passed since last dialog
+                                if ((now - (mainWindow._lastDialogTime || 0)) > 2000) {
+                                    mainWindow._dialogShowing = true;
+                                    mainWindow._lastDialogTime = now;
+                                    
+                                    // Show warning dialog via SweetAlert
+                                    if (mainWindow && !mainWindow.isDestroyed()) {
+                                        mainWindow.webContents.send('show-sweetalert-warning', {
+                                            title: 'Unauthorized Action Detected',
+                                            text: 'Windows key or unauthorized action detected. You are not allowed to access other applications or the Windows Start menu during the exam. Please remain focused on the exam application.',
+                                            icon: 'warning',
+                                            confirmButtonText: 'OK',
+                                            allowOutsideClick: false,
+                                            allowEscapeKey: false
+                                        });
+                                    }
+                                    
+                                    // Dialog close will be handled in renderer via IPC
+                                    // Set a timeout to reset dialog flag after reasonable time
+                                    setTimeout(() => {
+                                        mainWindow._dialogShowing = false;
+                                    }, 5000); // Reset after 5 seconds if not already reset
+                                } else {
+                                    // If dialog was shown recently, just refocus without showing another dialog
+                                    mainWindow.focus();
+                                    // mainWindow.setAlwaysOnTop(true);
+                                    // Force fullscreen to close any overlays
+                                    // if (!mainWindow.isFullScreen()) {
+                                    //     mainWindow.setFullScreen(true);
+                                    // }
+                                }
+                            }
+                            
+                            // Ensure window covers full screen and taskbar is hidden
+                            const primaryDisplay = screen.getPrimaryDisplay();
+                            const currentBounds = mainWindow.getBounds();
+                            const screenBounds = primaryDisplay.bounds;
+                            
+                            // Always ensure taskbar is hidden
+                            // mainWindow.setSkipTaskbar(true);
+                            
+                            // Ensure window covers entire screen including taskbar area
+                            if (currentBounds.width !== screenBounds.width || 
+                                currentBounds.height !== screenBounds.height ||
+                                currentBounds.x !== screenBounds.x ||
+                                currentBounds.y !== screenBounds.y) {
+                                // mainWindow.setBounds(screenBounds);
+                            }
+                            
+                            // Ensure fullscreen is maintained
+                            // if (!mainWindow.isFullScreen()) {
+                            //     mainWindow.setFullScreen(true);
+                            // }
+                        } catch (error) {
+                            // Silently handle errors to avoid console spam
+                        }
+                    } else {
+                        clearInterval(aggressiveFocusInterval);
+                    }
+                }, 50); // Check every 50ms - very aggressive to catch Start menu immediately
+                
+                // Store interval for cleanup
+                mainWindow._aggressiveFocusInterval = aggressiveFocusInterval;
+            }, 1500); // Wait 1.5 seconds after window is ready before starting aggressive monitoring
+        });
+        
+        // Clean up intervals on window close
+        mainWindow.on('closed', () => {
+            if (focusInterval) {
+                clearInterval(focusInterval);
+                focusInterval = null;
+            }
+            if (mainWindow._aggressiveFocusInterval) {
+                clearInterval(mainWindow._aggressiveFocusInterval);
+                mainWindow._aggressiveFocusInterval = null;
+            }
+        });
+    }
     mainWindow.webContents.on('before-input-event', (event, input) => {
         // Block Tab key
         if (input.key === 'Tab') {
@@ -127,16 +366,65 @@ function createWindow() {
             return;
         }
 
-        // Block Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS
-        const devToolShortcuts = (
-            (input.key === 'I' && input.control && input.shift) || // Ctrl+Shift+I
-            (input.key === 'F12') ||
-            (input.meta && input.alt && input.key === 'I')         // Cmd+Opt+I
-        );
-
-        if (devToolShortcuts) {
-            event.preventDefault();
+        // Windows-specific: Block Alt+Tab and other escape mechanisms
+        if (process.platform === 'win32') {
+            // Block Alt+Tab (Alt key + Tab key)
+            if (input.key === 'Tab' && input.alt) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Alt+Esc
+            if (input.key === 'Escape' && input.alt) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Windows key combinations
+            if (input.key === 'Meta' || input.key === 'Super') {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Ctrl+Esc (opens Start menu)
+            if (input.key === 'Escape' && input.control) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Win+D (show desktop)
+            if (input.key === 'd' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Win+R (run dialog)
+            if (input.key === 'r' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Win+E (file explorer)
+            if (input.key === 'e' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Win+L (lock screen)
+            if (input.key === 'l' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+            
+            // Block Win+M (minimize all)
+            if (input.key === 'm' && input.meta) {
+                event.preventDefault();
+                return;
+            }
         }
+
+        // Allow DevTools shortcuts (Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS)
+        // Removed blocking to allow toggling DevTools
     });
     
     // Handle failed loads (including iframe errors)
@@ -165,25 +453,31 @@ function createWindow() {
     mainWindow.on('close', (event) => {
         event.preventDefault(); // Prevent default close behavior
 
-        dialog.showMessageBox(mainWindow, {
-            type: 'question',
-            buttons: ['Yes, Exit', 'Cancel'],
-            defaultId: 1, // Default to Cancel
-            cancelId: 1,
-            title: 'Exit ProctorX',
-            message: 'Are you sure you want to exit application?',
-            detail: 'This will close the application completely and you will need to restart it to continue.'
-        }).then((result) => {
-            if (result.response === 0) { // User clicked "Yes, Exit"
-                // Force quit the application completely
-                app.exit(0);
-            }
-            // If user clicked Cancel, do nothing (window stays open)
-        }).catch((err) => {
-            console.error('Error showing exit dialog:', err);
-            // If dialog fails, allow close
+        // Show SweetAlert confirmation dialog
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('show-sweetalert-confirm', {
+                title: 'Exit ProctorX',
+                text: 'Are you sure you want to exit application? This will close the application completely and you will need to restart it to continue.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Yes, Exit',
+                cancelButtonText: 'Cancel',
+                allowOutsideClick: false,
+                allowEscapeKey: false
+            });
+            
+            // Listen for response
+            const handler = (event, confirmed) => {
+                ipcMain.removeListener('sweetalert-confirm-response', handler);
+                if (confirmed) {
+                    app.exit(0);
+                }
+                // If cancelled, do nothing (window stays open)
+            };
+            ipcMain.once('sweetalert-confirm-response', handler);
+        } else {
             app.exit(0);
-        });
+        }
     });
 
 }
@@ -243,10 +537,28 @@ app.on('open-url', (event, url) => {
 
 app.setAsDefaultProtocolClient('proctorx');
 app.on('web-contents-created', (_, contents) => {
-    // Block Tab key on all windows
+    // Block Tab key and Windows-specific shortcuts on all windows
     contents.on('before-input-event', (event, input) => {
         if (input.key === 'Tab') {
             event.preventDefault();
+        }
+        
+        // Windows-specific: Block escape mechanisms
+        if (process.platform === 'win32') {
+            // Block Alt+Tab
+            if (input.key === 'Tab' && input.alt) {
+                event.preventDefault();
+            }
+            
+            // Block Windows key
+            if (input.key === 'Meta' || input.key === 'Super') {
+                event.preventDefault();
+            }
+            
+            // Block Ctrl+Esc
+            if (input.key === 'Escape' && input.control) {
+                event.preventDefault();
+            }
         }
     });
 
@@ -362,6 +674,12 @@ ipcMain.handle('get-display-media', async () => {
     }
 })
 
+// Clean up global shortcuts on quit
+app.on('will-quit', () => {
+    // Unregister all global shortcuts
+    globalShortcut.unregisterAll();
+});
+
 // Quit when all windows are closed - force quit completely
 app.on('window-all-closed', () => {
     // Force quit the application completely on all platforms
@@ -436,31 +754,101 @@ app.whenReady().then(() => {
     // Setup display monitoring
     setupDisplayMonitoring();
 
-    // Register global shortcut for exit
-    globalShortcut.register('CommandOrControl+Shift+Q', () => {
-        // Show confirmation dialog before quitting
-        if (mainWindow) {
-            dialog.showMessageBox(mainWindow, {
-                type: 'question',
-                buttons: ['Yes, Exit', 'Cancel'],
-                defaultId: 1, // Default to Cancel
-                cancelId: 1,
-                title: 'Exit ProctorX',
-                message: 'Are you sure you want to exit application?',
-                detail: 'This will close the application completely and you will need to restart it to continue.'
-            }).then((result) => {
-                if (result.response === 0) { // User clicked "Yes, Exit"
-                    app.exit(0);
+    // Windows-specific: Register global shortcuts to block Windows key combinations
+    // Do this after window creation to avoid blocking startup
+    if (process.platform === 'win32') {
+        // Helper function to safely register shortcuts
+        const registerShortcut = (accelerator, description) => {
+            try {
+                const ret = globalShortcut.register(accelerator, () => {
+                    console.log(`${description} blocked`);
+                    // Immediately refocus our window
+                     
+                    return false;
+                });
+                if (!ret) {
+                    console.warn(`Failed to register shortcut: ${accelerator}`);
+                } else {
+                    console.log(`Successfully registered shortcut: ${accelerator}`);
                 }
-            }).catch((err) => {
-                console.error('Error showing exit dialog:', err);
-                app.exit(0);
-            });
-        } else {
-            app.exit(0);
+            } catch (error) {
+                console.error(`Error registering shortcut ${accelerator}:`, error);
+            }
+        };
+        
+        // Block Alt+Tab
+        registerShortcut('Alt+Tab', 'Alt+Tab');
+        
+        // Block Alt+Esc
+        registerShortcut('Alt+Esc', 'Alt+Esc');
+        
+        // Block Ctrl+Esc
+        registerShortcut('Ctrl+Esc', 'Ctrl+Esc');
+        
+        // Block Win+D (show desktop)
+        registerShortcut('Super+D', 'Win+D');
+        
+        // Block Win+R (run dialog)
+        registerShortcut('Super+R', 'Win+R');
+        
+        // Block Win+E (file explorer)
+        registerShortcut('Super+E', 'Win+E');
+        
+        // Block Win+L (lock screen)
+        registerShortcut('Super+L', 'Win+L');
+        
+        // Block Win+M (minimize all)
+        registerShortcut('Super+M', 'Win+M');
+        
+        // Block Win+X (power user menu)
+        registerShortcut('Super+X', 'Win+X');
+        
+        // Block Win+Tab (Task View)
+        registerShortcut('Super+Tab', 'Win+Tab');
+        
+        // Block Win+Space (switch input language)
+        registerShortcut('Super+Space', 'Win+Space');
+        
+        // Block Win+Number keys (open taskbar apps)
+        for (let i = 1; i <= 9; i++) {
+            registerShortcut(`Super+${i}`, `Win+${i}`);
         }
-    });
+        
+        // Additional aggressive blocking will be set up after window is created
+        // (moved to createWindow function to avoid accessing mainWindow before it exists)
+    }
 
-    // Create the main window
+    // Register global shortcut for exit
+    try {
+        globalShortcut.register('CommandOrControl+Shift+Q', () => {
+            // Show confirmation dialog before quitting
+            if (mainWindow) {
+                mainWindow.webContents.send('show-sweetalert-confirm', {
+                    title: 'Exit ProctorX',
+                    text: 'Are you sure you want to exit application? This will close the application completely and you will need to restart it to continue.',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Yes, Exit',
+                    cancelButtonText: 'Cancel',
+                    allowOutsideClick: false,
+                    allowEscapeKey: false
+                });
+                
+                // Listen for response
+                const handler = (event, confirmed) => {
+                    ipcMain.removeListener('sweetalert-confirm-response', handler);
+                    if (confirmed) {
+                        app.exit(0);
+                    }
+                    // If cancelled, do nothing (window stays open)
+                };
+                ipcMain.once('sweetalert-confirm-response', handler);
+            } else {
+                app.exit(0);
+            }
+        });
+    } catch (error) {
+        console.error('Error registering exit shortcut:', error);
+    }
     createWindow();
 })

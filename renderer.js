@@ -995,6 +995,122 @@ function disableTextSelection() {
     });
 }
 
+// === SweetAlert Handlers ===
+// Ensure Swal is available from window (loaded from local file)
+const getSwal = () => {
+    if (typeof window !== 'undefined' && window.Swal) {
+        return window.Swal;
+    }
+    console.error('SweetAlert2 is not available. Make sure sweetalert2.all.min.js is loaded.');
+    return null;
+};
+
+// Wait for Swal to be available before setting up handlers
+let swalRetryCount = 0;
+const MAX_SWAL_RETRIES = 50; // 5 seconds max wait time
+
+const setupSweetAlertHandlers = () => {
+    if (!window.Swal) {
+        swalRetryCount++;
+        if (swalRetryCount < MAX_SWAL_RETRIES) {
+            // Wait a bit and try again
+            setTimeout(setupSweetAlertHandlers, 100);
+            return;
+        } else {
+            console.error('SweetAlert2 failed to load after multiple attempts. Check if sweetalert2.all.min.js is included in the build.');
+            return;
+        }
+    }
+    
+    console.log('SweetAlert2 loaded successfully, setting up handlers');
+
+    if (window.electronAPI && window.electronAPI.onShowSweetAlertWarning) {
+        window.electronAPI.onShowSweetAlertWarning(async (options) => {
+            const Swal = getSwal();
+            if (!Swal) {
+                console.error('Cannot show SweetAlert: Swal is not defined');
+                return;
+            }
+            const result = await Swal.fire({
+                title: options.title || 'Warning',
+                text: options.text || '',
+                icon: options.icon || 'warning',
+                confirmButtonText: options.confirmButtonText || 'OK',
+                allowOutsideClick: options.allowOutsideClick !== false,
+                allowEscapeKey: options.allowEscapeKey !== false,
+                backdrop: true,
+                focusConfirm: true
+            });
+            
+            // Request window state restoration
+            if (window.electronAPI && window.electronAPI.restoreWindowState) {
+                window.electronAPI.restoreWindowState();
+            }
+        });
+    }
+
+    if (window.electronAPI && window.electronAPI.onShowSweetAlertConfirm) {
+        window.electronAPI.onShowSweetAlertConfirm(async (options) => {
+            const Swal = getSwal();
+            if (!Swal) {
+                console.error('Cannot show SweetAlert: Swal is not defined');
+                return;
+            }
+            const result = await Swal.fire({
+                title: options.title || 'Confirm',
+                text: options.text || '',
+                icon: options.icon || 'question',
+                showCancelButton: options.showCancelButton !== false,
+                confirmButtonText: options.confirmButtonText || 'OK',
+                cancelButtonText: options.cancelButtonText || 'Cancel',
+                allowOutsideClick: options.allowOutsideClick !== false,
+                allowEscapeKey: options.allowEscapeKey !== false,
+                backdrop: true,
+                focusConfirm: true
+            });
+            
+            // Send response to main process
+            if (window.electronAPI && window.electronAPI.sendSweetAlertConfirmResponse) {
+                window.electronAPI.sendSweetAlertConfirmResponse(result.isConfirmed);
+            }
+        });
+    }
+
+    if (window.electronAPI && window.electronAPI.onShowSweetAlertDialog) {
+        window.electronAPI.onShowSweetAlertDialog(async (options) => {
+            const Swal = getSwal();
+            if (!Swal) {
+                console.error('Cannot show SweetAlert: Swal is not defined');
+                return;
+            }
+            const result = await Swal.fire({
+                title: options.title || 'Confirm',
+                text: options.text || '',
+                icon: options.icon || 'question',
+                showCancelButton: options.showCancelButton !== false,
+                confirmButtonText: options.confirmButtonText || 'OK',
+                cancelButtonText: options.cancelButtonText || 'Cancel',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                backdrop: true,
+                focusConfirm: true
+            });
+            
+            // Send response to main process
+            if (window.electronAPI && window.electronAPI.sendSweetAlertResponse) {
+                window.electronAPI.sendSweetAlertResponse(result.isConfirmed);
+            }
+        });
+    }
+};
+
+// Start setting up handlers when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupSweetAlertHandlers);
+} else {
+    setupSweetAlertHandlers();
+}
+
 // === On DOM Content Load ===
 document.addEventListener('DOMContentLoaded', () => {
     const iframe = document.getElementById('lmsFrame');
