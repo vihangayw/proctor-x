@@ -995,6 +995,9 @@ function disableTextSelection() {
     });
 }
 
+// === Multiple Display Alert Management ===
+let multipleDisplayAlert = null;
+
 // === SweetAlert Handlers ===
 // Ensure Swal is available from window (loaded from local file)
 const getSwal = () => {
@@ -1051,6 +1054,16 @@ const setupSweetAlertHandlers = () => {
 
     if (window.electronAPI && window.electronAPI.onShowSweetAlertConfirm) {
         window.electronAPI.onShowSweetAlertConfirm(async (options) => {
+            // Don't show exit dialog if multiple display alert is showing
+            if (multipleDisplayAlert) {
+                console.log('Exit dialog blocked: Multiple display alert is showing');
+                // Send cancel response
+                if (window.electronAPI && window.electronAPI.sendSweetAlertConfirmResponse) {
+                    window.electronAPI.sendSweetAlertConfirmResponse(false);
+                }
+                return;
+            }
+            
             const Swal = getSwal();
             if (!Swal) {
                 console.error('Cannot show SweetAlert: Swal is not defined');
@@ -1102,19 +1115,312 @@ const setupSweetAlertHandlers = () => {
             }
         });
     }
+
+    // Multiple display alert - non-dismissable
+    if (window.electronAPI && window.electronAPI.onShowSweetAlertMultipleDisplay) {
+        window.electronAPI.onShowSweetAlertMultipleDisplay(async (options) => {
+            console.log('Received multiple display alert request', options);
+            const Swal = getSwal();
+            if (!Swal) {
+                console.error('Cannot show SweetAlert: Swal is not defined, will retry');
+                // Retry multiple times with increasing delays
+                let retryCount = 0;
+                const maxRetries = 10;
+                const retryInterval = setInterval(() => {
+                    retryCount++;
+                    const SwalRetry = getSwal();
+                    if (SwalRetry) {
+                        clearInterval(retryInterval);
+                        console.log('SweetAlert now available, showing alert');
+                        showMultipleDisplayAlert(SwalRetry, options);
+                    } else if (retryCount >= maxRetries) {
+                        clearInterval(retryInterval);
+                        console.error('SweetAlert failed to load after multiple retries');
+                    }
+                }, 500);
+                return;
+            }
+            console.log('SweetAlert available, showing alert immediately');
+            showMultipleDisplayAlert(Swal, options);
+        });
+    } else {
+        console.warn('onShowSweetAlertMultipleDisplay handler not available');
+    }
+
+    // Helper function to show multiple display alert
+    function showMultipleDisplayAlert(Swal, options) {
+        // Close existing alert if any
+        if (multipleDisplayAlert) {
+            Swal.close();
+            multipleDisplayAlert = null;
+        }
+        // Show non-dismissable alert
+        multipleDisplayAlert = Swal.fire({
+            title: options.title || 'Multiple Displays Detected',
+            text: options.text || '',
+            icon: options.icon || 'warning',
+            showConfirmButton: false,
+            showCancelButton: false,
+            showCloseButton: false,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            allowEnterKey: false,
+            backdrop: 'rgba(0,0,0,0.95)', // Very dark backdrop (95% black opacity)
+            didOpen: () => {
+                // Disable all keyboard shortcuts and prevent any interaction
+                const container = Swal.getContainer();
+                if (container) {
+                    // Block all keyboard events
+                    container.addEventListener('keydown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }, true); // Use capture phase
+                    
+                    // Block all keyboard events on document level too
+                    document.addEventListener('keydown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }, true);
+                    
+                    // Block mouse clicks outside the alert
+                    container.addEventListener('click', (e) => {
+                        if (e.target === container || e.target.classList.contains('swal2-backdrop-show')) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    }, true);
+                }
+                
+                // Notify main process that alert is shown
+                if (window.electronAPI && window.electronAPI.notifyMultipleDisplayAlertShown) {
+                    window.electronAPI.notifyMultipleDisplayAlertShown();
+                    console.log('Notified main process that alert is shown');
+                }
+            },
+            willClose: () => {
+                // Prevent closing - only allow programmatic close
+                if (multipleDisplayAlert) {
+                    // Only allow close if explicitly requested (display count = 1)
+                    // This prevents accidental closes
+                    return false;
+                }
+            }
+        });
+        
+        // Prevent the alert from being closed by any means
+        // Monitor for close attempts and immediately reopen
+        const preventClose = setInterval(() => {
+            if (multipleDisplayAlert && Swal.isVisible() === false) {
+                // Alert was closed, reopen it immediately
+                console.warn('Multiple display alert was closed, reopening...');
+                multipleDisplayAlert = Swal.fire({
+                    title: options.title || 'Multiple Displays Detected',
+                    text: options.text || '',
+                    icon: options.icon || 'warning',
+                    showConfirmButton: false,
+                    showCancelButton: false,
+                    showCloseButton: false,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    allowEnterKey: false,
+                    backdrop: 'rgba(0,0,0,0.95)', // Very dark backdrop (95% black opacity)
+                    didOpen: () => {
+                        const container = Swal.getContainer();
+                        if (container) {
+                            container.addEventListener('keydown', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                return false;
+                            }, true);
+                            document.addEventListener('keydown', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.stopImmediatePropagation();
+                                return false;
+                            }, true);
+                        }
+                    }
+                });
+            }
+        }, 100);
+        
+        // Store the interval so we can clear it when display count becomes 1
+        if (!window._multipleDisplayAlertInterval) {
+            window._multipleDisplayAlertInterval = preventClose;
+        }
+        console.log('Multiple display alert shown');
+    }
+
+    // Close multiple display alert
+    if (window.electronAPI && window.electronAPI.onCloseMultipleDisplayAlert) {
+        window.electronAPI.onCloseMultipleDisplayAlert(() => {
+            console.log('Received close multiple display alert request');
+            const Swal = getSwal();
+            if (Swal && multipleDisplayAlert) {
+                // Clear the interval that prevents closing
+                if (window._multipleDisplayAlertInterval) {
+                    clearInterval(window._multipleDisplayAlertInterval);
+                    window._multipleDisplayAlertInterval = null;
+                }
+                Swal.close();
+                multipleDisplayAlert = null;
+                // Notify main process that alert is closed
+                if (window.electronAPI && window.electronAPI.notifyMultipleDisplayAlertClosed) {
+                    window.electronAPI.notifyMultipleDisplayAlertClosed();
+                }
+                console.log('Multiple display alert closed');
+            }
+        });
+    }
 };
 
-// Start setting up handlers when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupSweetAlertHandlers);
-} else {
+// Set up handlers immediately (don't wait for DOMContentLoaded)
+// This ensures handlers are ready before IPC messages arrive
+if (window.electronAPI) {
+    console.log('Setting up SweetAlert handlers immediately');
     setupSweetAlertHandlers();
+} else {
+    console.warn('electronAPI not available yet, will retry');
+    // Retry when electronAPI becomes available
+    const checkElectronAPI = setInterval(() => {
+        if (window.electronAPI) {
+            clearInterval(checkElectronAPI);
+            console.log('electronAPI now available, setting up handlers');
+            setupSweetAlertHandlers();
+        }
+    }, 100);
+    
+    // Stop checking after 5 seconds
+    setTimeout(() => {
+        clearInterval(checkElectronAPI);
+    }, 5000);
+}
+
+// Also set up on DOMContentLoaded as backup
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        // Handlers already set up, but verify
+        if (window.electronAPI && !window.electronAPI.onShowSweetAlertMultipleDisplay) {
+            console.log('Re-setting up SweetAlert handlers on DOMContentLoaded');
+            setupSweetAlertHandlers();
+        }
+    });
+}
+
+// === Status Bar Management ===
+let batteryUpdateInterval = null;
+let networkUpdateInterval = null;
+let timeUpdateInterval = null;
+
+// Update time display
+function updateTime() {
+    const timeElement = document.getElementById('timeText');
+    if (timeElement) {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        timeElement.textContent = `${hours}:${minutes}`;
+    }
+}
+
+// Update battery status
+async function updateBatteryStatus() {
+    const batteryElement = document.getElementById('batteryStatus');
+    const batteryText = document.getElementById('batteryText');
+    
+    if (!batteryElement || !batteryText) return;
+    
+    try {
+        // Use Battery API if available
+        if ('getBattery' in navigator) {
+            const battery = await navigator.getBattery();
+            const level = Math.round(battery.level * 100);
+            const charging = battery.charging;
+            
+            batteryText.textContent = `${level}%`;
+            
+            // Update styling based on battery level and charging status
+            batteryElement.classList.remove('low', 'charging');
+            if (charging) {
+                batteryElement.classList.add('charging');
+            } else if (level <= 20) {
+                batteryElement.classList.add('low');
+            }
+        } else {
+            // Fallback if Battery API not available
+            batteryText.textContent = 'N/A';
+        }
+    } catch (error) {
+        console.error('Error updating battery status:', error);
+        batteryText.textContent = 'N/A';
+    }
+}
+
+// Update network status
+function updateNetworkStatus() {
+    const networkElement = document.getElementById('networkStatus');
+    const networkText = document.getElementById('networkText');
+    
+    if (!networkElement || !networkText) return;
+    
+    const online = navigator.onLine;
+    
+    if (online) {
+        networkText.textContent = 'Online';
+        networkElement.classList.remove('offline');
+    } else {
+        networkText.textContent = 'Offline';
+        networkElement.classList.add('offline');
+    }
+}
+
+// Initialize status bar
+function initializeStatusBar() {
+    // Update time immediately and then every minute
+    updateTime();
+    timeUpdateInterval = setInterval(updateTime, 60000); // Update every minute
+    
+    // Update battery status immediately and then every 30 seconds
+    updateBatteryStatus();
+    batteryUpdateInterval = setInterval(updateBatteryStatus, 30000); // Update every 30 seconds
+    
+    // Update network status immediately and then every 5 seconds
+    updateNetworkStatus();
+    networkUpdateInterval = setInterval(updateNetworkStatus, 5000); // Update every 5 seconds
+    
+    // Listen for online/offline events
+    window.addEventListener('online', updateNetworkStatus);
+    window.addEventListener('offline', updateNetworkStatus);
+    
+    // Listen for battery charging change events
+    if ('getBattery' in navigator) {
+        navigator.getBattery().then(battery => {
+            battery.addEventListener('chargingchange', updateBatteryStatus);
+            battery.addEventListener('levelchange', updateBatteryStatus);
+        });
+    }
 }
 
 // === On DOM Content Load ===
 document.addEventListener('DOMContentLoaded', () => {
     const iframe = document.getElementById('lmsFrame');
     console.info("DOMContentLoaded");
+    
+    // Verify SweetAlert handlers are set up
+    if (window.electronAPI && window.electronAPI.onShowSweetAlertMultipleDisplay) {
+        console.log('SweetAlert handlers verified on DOMContentLoaded');
+    } else {
+        console.warn('SweetAlert handlers not found, re-setting up');
+        setupSweetAlertHandlers();
+    }
+    
+    // Initialize status bar
+    initializeStatusBar();
 
     // Disable Tab key and text selection
     disableTabKey();

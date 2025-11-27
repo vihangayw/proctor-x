@@ -14,10 +14,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onShowSweetAlertWarning: (callback) => ipcRenderer.on('show-sweetalert-warning', (event, data) => callback(data)),
   onShowSweetAlertConfirm: (callback) => ipcRenderer.on('show-sweetalert-confirm', (event, data) => callback(data)),
   onShowSweetAlertDialog: (callback) => ipcRenderer.on('show-sweetalert-dialog', (event, data) => callback(data)),
+  onShowSweetAlertMultipleDisplay: (callback) => ipcRenderer.on('show-sweetalert-multiple-display', (event, data) => callback(data)),
+  onCloseMultipleDisplayAlert: (callback) => ipcRenderer.on('close-multiple-display-alert', (event) => callback()),
+  notifyMultipleDisplayAlertShown: () => ipcRenderer.send('multiple-display-alert-shown'),
+  notifyMultipleDisplayAlertClosed: () => ipcRenderer.send('multiple-display-alert-closed'),
   sendSweetAlertResponse: (confirmed) => ipcRenderer.send('sweetalert-dialog-response', confirmed),
   sendSweetAlertConfirmResponse: (confirmed) => ipcRenderer.send('sweetalert-confirm-response', confirmed),
   restoreWindowState: () => ipcRenderer.send('restore-window-state'),
   getPlatform: () => process.platform,
     // Add method to get display media stream from Electron
     getDisplayMedia: () => ipcRenderer.invoke('get-display-media'),
+  // Status bar APIs
+  getBatteryStatus: () => ipcRenderer.invoke('get-battery-status'),
+  getNetworkStatus: () => ipcRenderer.invoke('get-network-status'),
+  onBatteryStatusUpdate: (callback) => ipcRenderer.on('battery-status-update', (event, data) => callback(data)),
+  onNetworkStatusUpdate: (callback) => ipcRenderer.on('network-status-update', (event, data) => callback(data)),
 });

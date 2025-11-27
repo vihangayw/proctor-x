@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen, TouchBar } = require('electron')
 const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
@@ -12,6 +12,7 @@ app.commandLine.appendSwitch('disable-site-isolation-trials')
 let mainWindow
 
 let deeplinkData = null;
+let multipleDisplayAlertShowing = false; // Track if multiple display alert is showing
 
 remoteMain.initialize();
 
@@ -86,6 +87,20 @@ function createWindow() {
     }
     mainWindow.setMenu(null) // Remove menu bar
     
+    // Disable Touch Bar on macOS by creating an empty TouchBar
+    // This overrides system-level Touch Bar items like "now playing"
+    if (process.platform === 'darwin') {
+        try {
+            // Create an empty TouchBar with no items to completely disable it
+            const emptyTouchBar = new TouchBar({ items: [] });
+            mainWindow.setTouchBar(emptyTouchBar);
+        } catch (error) {
+            console.error('Error setting Touch Bar:', error);
+            // Fallback to null if TouchBar creation fails
+            mainWindow.setTouchBar(null);
+        }
+    }
+    
     // Windows-specific: Hide from taskbar and set additional properties
     if (process.platform === 'win32') {
         // Hide window from taskbar immediately
@@ -94,6 +109,29 @@ function createWindow() {
     
     // Ensure window is shown (important for kiosk mode on Windows)
     mainWindow.once('ready-to-show', () => {
+        // Check for multiple displays immediately when window is ready
+        const displays = screen.getAllDisplays();
+        console.log(`Detected ${displays.length} display(s) on ready-to-show`);
+        if (displays.length >= 2 && !multipleDisplayAlertShowing) {
+            // Wait a bit for renderer to be ready, then show alert
+            setTimeout(() => {
+                if (mainWindow && !mainWindow.isDestroyed() && !multipleDisplayAlertShowing) {
+                    console.log('Sending show-sweetalert-multiple-display IPC message from ready-to-show');
+                    // Don't set flag yet - wait for confirmation from renderer
+                    mainWindow.webContents.send('show-sweetalert-multiple-display', {
+                        title: 'Multiple Displays Detected',
+                        text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
+                        icon: 'warning',
+                        showConfirmButton: false,
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        allowEnterKey: false,
+                        showCloseButton: false
+                    });
+                }
+            }, 2000); // Wait 2 seconds for renderer to fully initialize
+        }
+        
         if (mainWindow && !mainWindow.isDestroyed()) {
             // Windows-specific: Ensure fullscreen and hide taskbar BEFORE showing
             if (process.platform === 'win32') {
@@ -166,20 +204,37 @@ function createWindow() {
     mainWindow.webContents.on('did-finish-load', () => {
         console.log('Window finished loading, checking for deeplink data...');
 
-        // Check for multiple displays
-        const displays = screen.getAllDisplays();
-        console.log(`Detected ${displays.length} display(s)`);
-        if (displays.length >= 2) {
-            // Show SweetAlert warning via IPC
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('show-sweetalert-warning', {
-                    title: 'Multiple Displays Detected',
-                    text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
-                    icon: 'warning',
-                    confirmButtonText: 'OK'
-                });
+        // Check for multiple displays - wait a bit for renderer to be ready
+        setTimeout(() => {
+            const displays = screen.getAllDisplays();
+            console.log(`Detected ${displays.length} display(s) on did-finish-load`);
+            if (displays.length >= 2) {
+                // Show non-dismissable SweetAlert warning via IPC
+                if (mainWindow && !mainWindow.isDestroyed() && !multipleDisplayAlertShowing) {
+                    console.log('Sending show-sweetalert-multiple-display IPC message from did-finish-load');
+                    // Don't set flag yet - wait for confirmation from renderer
+                    mainWindow.webContents.send('show-sweetalert-multiple-display', {
+                        title: 'Multiple Displays Detected',
+                        text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
+                        icon: 'warning',
+                        showConfirmButton: false,
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        allowEnterKey: false,
+                        showCloseButton: false
+                    });
+                } else if (multipleDisplayAlertShowing) {
+                    console.log('Multiple display alert already showing, skipping');
+                }
+            } else if (displays.length === 1 && multipleDisplayAlertShowing) {
+                // Auto-dismiss alert when display count becomes 1
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    multipleDisplayAlertShowing = false;
+                    console.log('Sending close-multiple-display-alert IPC message');
+                    mainWindow.webContents.send('close-multiple-display-alert');
+                }
             }
-        }
+        }, 1500); // Wait 1.5 seconds for renderer to be ready
 
         if (deeplinkData) {
             console.log('Found deeplink data, sending to renderer...');
@@ -718,6 +773,44 @@ ipcMain.handle('get-display-media', async () => {
     }
 })
 
+// Battery and Network Status Handlers
+ipcMain.handle('get-battery-status', async () => {
+    try {
+        // Use systemPreferences for battery info (Windows/Linux)
+        if (process.platform === 'win32' || process.platform === 'linux') {
+            // For Windows/Linux, we'll use a fallback approach
+            // The renderer will use navigator.getBattery() API
+            return { level: null, charging: null, available: false };
+        } else if (process.platform === 'darwin') {
+            // macOS can use systemPreferences
+            const systemPreferences = require('electron').systemPreferences;
+            // Note: systemPreferences doesn't have direct battery API
+            // We'll rely on the browser API in renderer
+            return { level: null, charging: null, available: false };
+        }
+    } catch (error) {
+        console.error('Error getting battery status:', error);
+        return { level: null, charging: null, available: false };
+    }
+});
+
+ipcMain.handle('get-network-status', async () => {
+    // Network status is better handled in the renderer using navigator.onLine
+    // This handler is kept for compatibility but renderer will use browser API
+    return { online: true };
+});
+
+// Handler for multiple display alert confirmation
+ipcMain.on('multiple-display-alert-shown', () => {
+    console.log('Multiple display alert confirmed as shown');
+    multipleDisplayAlertShowing = true;
+});
+
+ipcMain.on('multiple-display-alert-closed', () => {
+    console.log('Multiple display alert confirmed as closed');
+    multipleDisplayAlertShowing = false;
+});
+
 // Clean up global shortcuts on quit
 app.on('will-quit', () => {
     // Unregister all global shortcuts
@@ -755,41 +848,72 @@ ipcMain.on('quit-app', () => {
 function setupDisplayMonitoring() {
     // Listen for display added/removed events
     screen.on('display-added', (event, newDisplay) => {
+        // Check if mainWindow still exists before using it
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+        }
+        
         const displays = screen.getAllDisplays();
         console.log(`Display added. Total displays: ${displays.length}`);
-        if (displays.length >= 2 && mainWindow) {
-            dialog.showMessageBox(mainWindow, {
-                type: 'warning',
-                buttons: ['OK'],
-                defaultId: 0,
+        if (displays.length >= 2 && !multipleDisplayAlertShowing) {
+            // Show non-dismissable SweetAlert warning
+            // Don't set flag yet - wait for confirmation from renderer
+            mainWindow.webContents.send('show-sweetalert-multiple-display', {
                 title: 'Multiple Displays Detected',
-                message: `Warning: ${displays.length} display(s) detected`,
-                detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
-            }).catch((err) => {
-                console.error('Error showing display warning dialog:', err);
+                text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
+                icon: 'warning',
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                allowEnterKey: false,
+                showCloseButton: false
             });
         }
     });
 
     screen.on('display-removed', (event, oldDisplay) => {
+        // Check if mainWindow still exists before using it
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+        }
+        
         const displays = screen.getAllDisplays();
         console.log(`Display removed. Total displays: ${displays.length}`);
+        
+        // Auto-dismiss alert when display count becomes 1
+        if (displays.length === 1 && multipleDisplayAlertShowing) {
+            // Flag will be reset when renderer confirms closure
+            mainWindow.webContents.send('close-multiple-display-alert');
+        }
     });
 
     screen.on('display-metrics-changed', (event, display, changedMetrics) => {
+        // Check if mainWindow still exists before using it
+        if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+        }
+        
         const displays = screen.getAllDisplays();
         console.log(`Display metrics changed. Total displays: ${displays.length}`);
-        if (displays.length >= 2 && mainWindow) {
-            // dialog.showMessageBox(mainWindow, {
-            //     type: 'warning',
-            //     buttons: ['OK'],
-            //     defaultId: 0,
-            //     title: 'Multiple Displays Detected',
-            //     message: `Warning: ${displays.length} display(s) detected`,
-            //     detail: 'This application requires a single display setup. Please disconnect additional displays before continuing.'
-            // }).catch((err) => {
-            //     console.error('Error showing display warning dialog:', err);
-            // });
+        
+        // Check if we need to show or hide the alert
+        if (displays.length >= 2 && !multipleDisplayAlertShowing) {
+            // Show non-dismissable SweetAlert warning
+            // Don't set flag yet - wait for confirmation from renderer
+            mainWindow.webContents.send('show-sweetalert-multiple-display', {
+                title: 'Multiple Displays Detected',
+                text: `Warning: ${displays.length} display(s) detected. This application requires a single display setup. Please disconnect additional displays before continuing.`,
+                icon: 'warning',
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                allowEnterKey: false,
+                showCloseButton: false
+            });
+        } else if (displays.length === 1 && multipleDisplayAlertShowing) {
+            // Auto-dismiss alert when display count becomes 1
+            // Flag will be reset when renderer confirms closure
+            mainWindow.webContents.send('close-multiple-display-alert');
         }
     });
 }
@@ -865,8 +989,15 @@ app.whenReady().then(() => {
     // Register global shortcut for exit
     try {
         globalShortcut.register('CommandOrControl+Shift+Q', () => {
+            // Don't allow exit if multiple displays are detected
+            const displays = screen.getAllDisplays();
+            if (displays.length >= 2 && multipleDisplayAlertShowing) {
+                console.log('Exit blocked: Multiple displays detected');
+                return;
+            }
+            
             // Show confirmation dialog before quitting
-            if (mainWindow) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('show-sweetalert-confirm', {
                     title: 'Exit ProctorX',
                     text: 'Are you sure you want to exit application? This will close the application completely and you will need to restart it to continue.',

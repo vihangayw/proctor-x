@@ -111,12 +111,84 @@
     .content-container {
         position: relative;
     }
+
+    /* Status Bar - Top Right Corner */
+    #statusBar {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        background: #d3d3d3; /* Light grey background */
+        padding: 8px 15px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        z-index: 10000;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        backdrop-filter: blur(10px);
+        color: #000000; /* Black text */
+    }
+
+    .status-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        color: #000000; /* Black text */
+    }
+
+    .status-icon {
+        font-size: 16px;
+    }
+
+    #batteryStatus {
+        color: #000000; /* Black text */
+    }
+
+    #batteryStatus.low {
+        color: #d32f2f; /* Dark red for low battery */
+    }
+
+    #batteryStatus.charging {
+        color: #2e7d32; /* Dark green for charging */
+    }
+
+    #networkStatus {
+        color: #000000; /* Black text */
+    }
+
+    #networkStatus.offline {
+        color: #d32f2f; /* Dark red for offline */
+    }
+
+    #timeDisplay {
+        color: #000000; /* Black text */
+        font-family: 'Courier New', monospace;
+        letter-spacing: 1px;
+    }
   </style>
   <!-- SweetAlert2 - Local files for packaged app -->
   <link rel="stylesheet" href="sweetalert2.min.css">
   <script src="sweetalert2.all.min.js"></script>
 </head>
 <body>
+<!-- Status Bar - Always visible -->
+<div id="statusBar">
+    <div class="status-item" id="batteryStatus">
+        <span class="status-icon">🔋</span>
+        <span id="batteryText">--%</span>
+    </div>
+    <div class="status-item" id="networkStatus">
+        <span class="status-icon">📶</span>
+        <span id="networkText">Online</span>
+    </div>
+    <div class="status-item" id="timeDisplay">
+        <span id="timeText">--:--</span>
+    </div>
+</div>
+
 <div class="controls">
   <button id="shareScreen">Share Screen</button>
   <button id="stopShare" disabled>Stop Sharing</button>
