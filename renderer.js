@@ -20,6 +20,7 @@ let uploadInterval = null;
 
 const CONFIG = {
     BASE_API_URL: 'http://localhost:8383/api/v1',
+    EXAM_BASE_URL: 'http://localhost:8384/api/v1',
     BASE_LMS_URL: 'http://localhost:3001/lms-mc',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
     BASE_LANDING: './landing.html'
@@ -1751,9 +1752,10 @@ const uploadScreenCapture = async (sqid) => {
         let formData = new FormData();
         formData.append("image", blob, "frame.webp");
         formData.append("sqid", sqid + '');
+        formData.append("cam",   '0');
 
         // console.log('🚀 Sending upload request to:', `${CONFIG.BASE_API_URL}/vle/quiz/pic`);
-        const response = await fetch(`${CONFIG.BASE_API_URL}/vle/quiz/pic`, {
+        const response = await fetch(`${CONFIG.EXAM_BASE_URL}/vle/quiz/pic`, {
             method: 'POST',
             headers: {
                 'Authorization': localStorage.getItem('user_token')

@@ -36,8 +36,8 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        alwaysOnTop: true, // Keep window on top of others
+        kiosk: false, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: false, // Keep window on top of others
         movable: false, // Prevent window movement
         minimizable: false, // Disable minimize button
         maximizable: false, // Disable maximize button
