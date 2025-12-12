@@ -1291,6 +1291,9 @@ const setupSweetAlertHandlers = () => {
                     window.electronAPI.notifyMultipleDisplayAlertShown();
                     console.log('Notified main process that alert is shown');
                 }
+                
+                // Send audit log when multiple display warning is shown
+                sendAuditLog('Multiple display detected - warning shown');
             },
             willClose: () => {
                 // Prevent closing - only allow programmatic close
