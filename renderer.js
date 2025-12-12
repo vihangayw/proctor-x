@@ -18,6 +18,12 @@ let livekitRoom = null
 let livekitConnected = false
 let uploadInterval = null;
 
+// Store current exam data for audit logging
+let currentExamData = {
+    sqid: null,
+    qr: null
+};
+
 const CONFIG = {
     BASE_API_URL: 'http://localhost:8383/api/v1',
     EXAM_BASE_URL: 'http://localhost:8384/api/v1',
@@ -33,6 +39,72 @@ const LIVEKIT_CONFIG = {
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0c2xpdmVraXQiLCJleHAiOjE3NzA5OTQ1NjIsInN1YiI6ImRmQGdtYWlsLmNvbSIsIm5hbWUiOiJEIEZlcm5hbmRvIiwibWV0YWRhdGEiOiJtZXRhZGF0YSIsInZpZGVvIjp7InJvb21Kb2luIjp0cnVlLCJyb29tIjoiZGVtb19jbGFzcyIsImNhblB1Ymxpc2hEYXRhIjp0cnVlLCJjYW5QdWJsaXNoIjp0cnVlLCJjYW5TdWJzY3JpYmUiOmZhbHNlfSwic2lwIjp7fX0.VA8AxvUHB5-C4XO7JgIu8phaNR-WZYoc21I_g8F0A_Q',
     roomName: 'demo_class',
     participantName: 'Screen Sharer'
+};
+
+// Audit logging function
+const sendAuditLog = async (description) => {
+    try {
+        const id = currentExamData.sqid;
+        
+        // Get device type and app version
+        let deviceType = 'Unknown';
+        let appVersion = '';
+        
+        try {
+            // getPlatform is synchronous, no await needed
+            const platform = window.electronAPI.getPlatform();
+            // Map platform to readable device type
+            if (platform === 'darwin') {
+                deviceType = 'Mac';
+            } else if (platform === 'win32') {
+                deviceType = 'Windows';
+            } else if (platform === 'linux') {
+                deviceType = 'Linux';
+            }
+            
+            // Get app version if available (this is async)
+            if (window.electronAPI && window.electronAPI.getAppVersion) {
+                appVersion = await window.electronAPI.getAppVersion();
+            }
+        } catch (error) {
+            console.error('Error getting device info:', error);
+        }
+        
+        // Append device type and version to description
+        let fullDescription = description || "";
+        if (deviceType !== 'Unknown' || appVersion) {
+            const deviceInfo = [];
+            if (deviceType !== 'Unknown') {
+                deviceInfo.push(deviceType);
+            }
+            if (appVersion) {
+                deviceInfo.push(`v${appVersion}`);
+            }
+            if (deviceInfo.length > 0) {
+                fullDescription = `${description} [${deviceInfo.join(', ')}]`;
+            }
+        }
+         
+        const auditData = {
+             sqid: id ? parseInt(id) : 0,
+            description: fullDescription
+        };
+        
+        const userToken = localStorage.getItem('user_token');
+        
+        fetch(`${CONFIG.EXAM_BASE_URL}/vle/quiz/audit-log`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': userToken || ''
+            },
+            body: JSON.stringify(auditData)
+        }).catch((e) => {
+            console.error('Audit log error:', e);
+        });
+    } catch (error) {
+        console.error('Audit log error:', error);
+    }
 };
 
 const openScreenShare = async (quizId, examInfo, sqid) => {
@@ -883,11 +955,19 @@ document.getElementById('exitApp').addEventListener('click', async () => {
         })
 
         if (response === 0) { // User clicked OK
+            // Send audit log if in an exam
+            if (currentExamData.sqid) {
+                sendAuditLog('App exited during exam by user click');
+            }
             window.electronAPI.quitApp()
         }
     } catch (error) {
         console.error('Dialog error:', error)
         if (confirm('Are you sure you want to quit?')) {
+            // Send audit log if in an exam
+            if (currentExamData.sqid) {
+                sendAuditLog('App exited during exam by user click');
+            }
             window.electronAPI.quitApp()
         }
     }
@@ -1082,6 +1162,13 @@ const setupSweetAlertHandlers = () => {
                 backdrop: true,
                 focusConfirm: true
             });
+            
+            // If confirmed and it's an exit dialog, send audit log
+            if (result.isConfirmed && options.title && options.title.includes('Exit')) {
+                if (currentExamData.sqid) {
+                    sendAuditLog('App exited during exam by exit request');
+                }
+            }
             
             // Send response to main process
             if (window.electronAPI && window.electronAPI.sendSweetAlertConfirmResponse) {
@@ -1422,6 +1509,15 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize status bar
     initializeStatusBar();
+    
+    // Handle exit audit log request from main process
+    if (window.electronAPI && window.electronAPI.onSendExitAuditLog) {
+        window.electronAPI.onSendExitAuditLog(() => {
+            if (currentExamData.sqid) {
+                sendAuditLog('App exited during exam by exit request');
+            }
+        });
+    }
 
     // Disable Tab key and text selection
     disableTabKey();
@@ -1452,6 +1548,11 @@ window.electronAPI.onLaunchData(async (data) => {
     const { quizId, studentId, tkn, sqid, examType } = data;
     console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid, examType, examTypeType: typeof examType });
     console.log('📋 Full data object:', JSON.stringify(data, null, 2));
+
+    // Store exam data for audit logging
+    currentExamData = {
+        sqid: sqid
+    };
 
     const iframe = document.getElementById('lmsFrame');
     const errorMessage = document.getElementById('lmsError');
@@ -1576,6 +1677,9 @@ window.electronAPI.onLaunchData(async (data) => {
     };
 
     iframe.src = examUrl;
+
+    // Send audit log when exam opens
+    sendAuditLog('Exam opened from ProctorX URL');
 
     console.log('🔍 Getting exam info...');
     const examInfo = await getExamInfo(quizId, tkn, examType); // ✅ await here

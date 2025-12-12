@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSweetAlertConfirmResponse: (confirmed) => ipcRenderer.send('sweetalert-confirm-response', confirmed),
   restoreWindowState: () => ipcRenderer.send('restore-window-state'),
   getPlatform: () => process.platform,
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     // Add method to get display media stream from Electron
     getDisplayMedia: () => ipcRenderer.invoke('get-display-media'),
   // Status bar APIs
@@ -29,4 +30,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getNetworkStatus: () => ipcRenderer.invoke('get-network-status'),
   onBatteryStatusUpdate: (callback) => ipcRenderer.on('battery-status-update', (event, data) => callback(data)),
   onNetworkStatusUpdate: (callback) => ipcRenderer.on('network-status-update', (event, data) => callback(data)),
+  onSendExitAuditLog: (callback) => ipcRenderer.on('send-exit-audit-log', (event) => callback()),
 });

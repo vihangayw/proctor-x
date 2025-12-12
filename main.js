@@ -734,6 +734,11 @@ app.on('second-instance', (event, argv) => {
         }
     }
 });
+// Handle getting app version
+ipcMain.handle('get-app-version', async () => {
+    return app.getVersion();
+})
+
 // Handle getting screen sources
 ipcMain.handle('get-sources', async () => {
     return await desktopCapturer.getSources({ types: ['window', 'screen'] })
@@ -837,9 +842,19 @@ ipcMain.handle('show-dialog', async (_, options) => {
 ipcMain.on('quit-app', () => {
     console.log('Quit command received') // Debug log
     try {
-        app.quit()
+        // Send message to renderer to log exit audit before quitting
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('send-exit-audit-log');
+            // Give a small delay for audit log to be sent
+            setTimeout(() => {
+                app.quit();
+            }, 500);
+        } else {
+            app.quit();
+        }
     } catch (error) {
         console.error('Failed to quit:', error)
+        app.quit();
     }
 
 })
@@ -1013,7 +1028,16 @@ app.whenReady().then(() => {
                 const handler = (event, confirmed) => {
                     ipcMain.removeListener('sweetalert-confirm-response', handler);
                     if (confirmed) {
-                        app.exit(0);
+                        // Send message to renderer to log exit audit before quitting
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            mainWindow.webContents.send('send-exit-audit-log');
+                            // Give a small delay for audit log to be sent
+                            setTimeout(() => {
+                                app.exit(0);
+                            }, 500);
+                        } else {
+                            app.exit(0);
+                        }
                     }
                     // If cancelled, do nothing (window stays open)
                 };
