@@ -1126,6 +1126,9 @@ const setupSweetAlertHandlers = () => {
                 focusConfirm: true
             });
             
+            // Send audit log when Windows/Command key warning is shown
+            sendAuditLog('Windows/Command key pressed - unauthorized action detected');
+            
             // Request window state restoration
             if (window.electronAPI && window.electronAPI.restoreWindowState) {
                 window.electronAPI.restoreWindowState();
