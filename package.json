@@ -1,7 +1,7 @@
 {
   "name": "ProctorX",
   "productName": "ProctorX",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Electron application for online exams",
   "author": "Your Name <your.email@example.com>",
   "license": "ISC",
@@ -100,7 +100,7 @@
         "AppImage",
         "deb"
       ],
-      "maintainer": "your-email@example.com",
+      "maintainer": "vyasith@gmail.com",
       "icon": "assets/icon.png"
     }
   },

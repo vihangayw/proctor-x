@@ -25,11 +25,12 @@ let currentExamData = {
 };
 
 const CONFIG = {
-    BASE_API_URL: 'http://localhost:8383/api/v1',
-    EXAM_BASE_URL: 'http://localhost:8384/api/v1',
-    BASE_LMS_URL: 'http://localhost:3001/lms-mc',
+    BASE_API_URL: 'https://mcp.metropolitancollege.lk/lms-mc',
+    EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
+    BASE_LMS_URL: 'https://www.metropolitancollege.lk/testing',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
-    BASE_LANDING: './landing.html'
+    BASE_LANDING: './landing.html',
+    GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
 };
 
 // LiveKit Configuration
@@ -1500,6 +1501,109 @@ function initializeStatusBar() {
     }
 }
 
+// === Update Agent ===
+const checkAppVersion = async () => {
+    try {
+        console.log('🔍 Checking app version...');
+
+        // Get current app version
+        let currentVersion = '';
+        if (window.electronAPI && window.electronAPI.getAppVersion) {
+            currentVersion = await window.electronAPI.getAppVersion();
+            console.log('📱 Current app version:', currentVersion);
+        } else {
+            console.warn('⚠️ Could not get app version');
+            return;
+        }
+
+        // Check latest version from API
+        try {
+            const response = await fetch(`${CONFIG.BASE_API_URL}/vle/student/proctorx-v`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': CONFIG.GEN_TOKEN
+                }
+            });
+
+            if (!response.ok) {
+                console.warn('⚠️ Version check API returned error:', response.status);
+                return;
+            }
+
+            const data = await response.json();
+            const latestVersion = data.data || data?.message;
+
+            if (!latestVersion) {
+                console.warn('⚠️ Version not found in API response:', data);
+                return;
+            }
+
+            console.log('🌐 Latest version from API:', latestVersion);
+
+            // Compare versions (simple string comparison, can be enhanced with semver)
+            if (currentVersion !== latestVersion) {
+                console.log('⚠️ Version mismatch detected!');
+
+                // Show update notification using SweetAlert (non-closable)
+                const Swal = getSwal();
+                if (Swal) {
+                    Swal.fire({
+                        title: 'Update Available',
+                        html: `
+                            <p>Your current version (<strong>${currentVersion}</strong>) is outdated.</p>
+                            <p>The latest version (<strong>${latestVersion}</strong>) is available.</p>
+                            <p style="margin-top: 20px;"><strong>Please go to LMS > Downloads to download the latest version.</strong></p>
+                        `,
+                        icon: 'info',
+                        showConfirmButton: false,
+                        showCancelButton: false,
+                        showCloseButton: false,
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        allowEnterKey: false,
+                        backdrop: 'rgba(0,0,0,0.95)',
+                        didOpen: () => {
+                            // Block all keyboard events
+                            // const container = Swal.getContainer();
+                            // if (container) {
+                            // container.addEventListener('keydown', (e) => {
+                            //     e.preventDefault();
+                            //     e.stopPropagation();
+                            //     e.stopImmediatePropagation();
+                            //     return false;
+                            // }, true);
+
+                            // // Block all keyboard events on document level too
+                            // document.addEventListener('keydown', (e) => {
+                            //     e.preventDefault();
+                            //     e.stopPropagation();
+                            //     e.stopImmediatePropagation();
+                            //     return false;
+                            // }, true);
+                            // }
+                        },
+                        willClose: () => {
+                            // Prevent closing - only allow programmatic close
+                            return false;
+                        }
+                    });
+                } else {
+                    // Fallback to alert if SweetAlert is not available
+                    alert(`Update Available!\n\nYour current version (${currentVersion}) is outdated.\nThe latest version (${latestVersion}) is available.\n\nPlease go to LMS > Downloads to download the latest version.`);
+                }
+            } else {
+                console.log('✅ App is up to date');
+            }
+        } catch (error) {
+            console.error('❌ Error checking version from API:', error);
+            // Don't block the app if version check fails
+        }
+    } catch (error) {
+        console.error('❌ Error in version check:', error);
+    }
+};
+
 // === On DOM Content Load ===
 document.addEventListener('DOMContentLoaded', () => {
     const iframe = document.getElementById('lmsFrame');
@@ -1532,6 +1636,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const quizUrl = CONFIG.BASE_LANDING; // should be something like './landing.html'
     console.info('Loading:', quizUrl);
     iframe.src = quizUrl;
+
+    // Check app version when landing page loads (only once)
+    let versionCheckDone = false;
+    const checkVersionOnLandingPage = () => {
+        if (versionCheckDone) {
+            return; // Already checked, don't check again
+        }
+
+        // Only check version if we're on the landing page
+        const currentSrc = iframe.src || '';
+        if (currentSrc.includes('landing.html') || currentSrc.endsWith('landing.html') || quizUrl.includes('landing.html')) {
+            versionCheckDone = true; // Mark as done before calling
+            console.log('📄 Landing page detected, checking version...');
+            // Wait a bit for SweetAlert to be ready
+            setTimeout(() => {
+                checkAppVersion();
+            }, 1000);
+        }
+    };
+
+    // Listen for iframe load event
+    iframe.addEventListener('load', checkVersionOnLandingPage, {once: true});
+
+    // Also check after a delay as fallback (in case load event doesn't fire)
+    setTimeout(checkVersionOnLandingPage, 1500);
 
     // Test IPC communication
     console.log('🔧 Testing IPC communication...');
