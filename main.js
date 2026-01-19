@@ -16,6 +16,85 @@ let multipleDisplayAlertShowing = false; // Track if multiple display alert is s
 
 remoteMain.initialize();
 
+// Windows-specific: Request single instance lock to handle deep links when app is already running
+if (process.platform === 'win32') {
+    const gotTheLock = app.requestSingleInstanceLock();
+    if (!gotTheLock) {
+        // Another instance is already running, exit this one
+        app.exit(0);
+    }
+}
+
+// Helper function to parse deep link URL
+function parseDeeplinkUrl(url) {
+    try {
+        console.log('🔍 Parsing deep link URL:', url);
+        const parsed = new URL(url);
+        console.log('🔍 Parsed URL - hostname:', parsed.hostname, 'pathname:', parsed.pathname);
+        const parts = parsed.pathname.split('/').filter(Boolean); // Remove empty strings
+        console.log('🔍 URL parts:', parts, 'Length:', parts.length);
+
+        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
+        // The 'e-quiz' is part of the hostname, not pathname
+        // examType is either 'resit' or 'exam'
+        if (parts.length >= 6) {
+            const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
+            const data = { quizId, studentId, tkn, sqid: studentQuizId, examType };
+            console.log('✅ Successfully parsed deep link data:', data);
+            return data;
+        } else {
+            console.error('❌ Invalid URL structure. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
+            console.error('❌ Got', parts.length, 'parts, expected at least 6');
+            return null;
+        }
+    } catch (err) {
+        console.error('❌ Error parsing URL:', err);
+        return null;
+    }
+}
+
+// Helper function to send launch data to renderer
+function sendLaunchDataToRenderer(data) {
+    if (!data) return;
+    
+    if (mainWindow) {
+        console.log('Main window found, sending data...');
+        // Focus the window
+        if (mainWindow.isMinimized()) {
+            console.log('Window was minimized, restoring...');
+            mainWindow.restore();
+        }
+        mainWindow.focus();
+        console.log('Window focused');
+
+        // Send data when window is ready
+        if (mainWindow.webContents.isLoading()) {
+            console.log('Window is still loading, waiting for did-finish-load...');
+            mainWindow.webContents.once('did-finish-load', () => {
+                console.log('Window finished loading, sending launch data...');
+                // Add a delay to ensure renderer DOMContentLoaded and handlers are ready
+                setTimeout(() => {
+                    console.log('Sending launch-data IPC message...');
+                    mainWindow.webContents.send('launch-data', data);
+                    console.log('Launch data sent successfully');
+                }, 1000); // Increased delay to ensure renderer is fully ready
+            });
+        } else {
+            console.log('Window already loaded, sending launch data...');
+            // Add a delay to ensure renderer DOMContentLoaded and handlers are ready
+            setTimeout(() => {
+                console.log('Sending launch-data IPC message...');
+                mainWindow.webContents.send('launch-data', data);
+                console.log('Launch data sent successfully');
+            }, 1000); // Increased delay to ensure renderer is fully ready
+        }
+    } else {
+        console.error('Main window not found, storing deeplink data for later');
+        // Store data to send when window is created
+        deeplinkData = data;
+    }
+}
+
 function createWindow() {
 
     let iconPath;
@@ -38,17 +117,17 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         kiosk: false, // True kiosk mode (even more restrictive than fullscreen)
         alwaysOnTop: false, // Keep window on top of others
-        movable: false, // Prevent window movement
-        minimizable: false, // Disable minimize button
-        maximizable: false, // Disable maximize button
-        closable: false, // Enable close button
-        titleBarStyle: 'hidden', // Alternative to frame: false on macOS
-        autoHideMenuBar: true,// Alternative for menu visibility
+        movable: true, // Prevent window movement
+        minimizable: true, // Disable minimize button
+        maximizable: true, // Disable maximize button
+        closable: true, // Enable close button
+        // titleBarStyle: 'hidden', // Alternative to frame: false on macOS
+        // autoHideMenuBar: true,// Alternative for menu visibility
         width: 1000, // Default width (will be overridden by fullscreen)
         height: 800, // Default height (will be overridden by fullscreen)
-        fullscreen: true, // Enable fullscreen mode
-        resizable: false, // Disable window resizing
-        frame: false, // Remove window frame (including close/minimize buttons)
+        // fullscreen: true, // Enable fullscreen mode
+        // resizable: false, // Disable window resizing
+        // frame: false, // Remove window frame (including close/minimize buttons)
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -82,11 +161,11 @@ function createWindow() {
     app.setAsDefaultProtocolClient('proctorx');
 
     // Open DevTools in development
-    if (!app.isPackaged) {
+    // if (!app.isPackaged) {
         mainWindow.webContents.openDevTools()
-    }
-    mainWindow.setMenu(null) // Remove menu bar
-    
+    // }
+    // mainWindow.setMenu(null) // Remove menu bar
+
     // Disable Touch Bar on macOS by creating an empty TouchBar
     // This overrides system-level Touch Bar items like "now playing"
     if (process.platform === 'darwin') {
@@ -100,13 +179,13 @@ function createWindow() {
             mainWindow.setTouchBar(null);
         }
     }
-    
+
     // Windows-specific: Hide from taskbar and set additional properties
     if (process.platform === 'win32') {
         // Hide window from taskbar immediately
-        mainWindow.setSkipTaskbar(true);
+        mainWindow.setSkipTaskbar(false);
     }
-    
+
     // Ensure window is shown (important for kiosk mode on Windows)
     mainWindow.once('ready-to-show', () => {
         // Check for multiple displays immediately when window is ready
@@ -131,73 +210,73 @@ function createWindow() {
                 }
             }, 2000); // Wait 2 seconds for renderer to fully initialize
         }
-        
+
         if (mainWindow && !mainWindow.isDestroyed()) {
             // Windows-specific: Ensure fullscreen and hide taskbar BEFORE showing
             if (process.platform === 'win32') {
                 // Set fullscreen and hide taskbar before showing window
-                mainWindow.setSkipTaskbar(true);
-                mainWindow.setFullScreen(true);
-                mainWindow.setAlwaysOnTop(true);
+                mainWindow.setSkipTaskbar(false);
+                //mainWindow.setFullScreen(false);
+                //mainWindow.setAlwaysOnTop(true);
             }
-            
+
             mainWindow.show();
             mainWindow.focus();
-            
+
             // Additional Windows-specific setup after window is shown
             // Use multiple attempts to ensure taskbar is hidden and window is on top
             if (process.platform === 'win32') {
                 // Immediate setup - right after show()
                 if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.setSkipTaskbar(true);
-                    mainWindow.setFullScreen(true);
-                    mainWindow.setAlwaysOnTop(true);
+                    mainWindow.setSkipTaskbar(false);
+                    //mainWindow.setFullScreen(false);
+                    //mainWindow.setAlwaysOnTop(true);
                     mainWindow.focus();
                 }
-                
+
                 // First attempt after a brief delay
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.setFullScreen(true);
-                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setSkipTaskbar(false);
+                        //mainWindow.setFullScreen(false);
+                        //mainWindow.setAlwaysOnTop(true);
                         mainWindow.focus();
                     }
                 }, 50);
-                
+
                 // Second attempt to ensure it sticks
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.setFullScreen(true);
-                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setSkipTaskbar(false);
+                        //mainWindow.setFullScreen(false);
+                        //mainWindow.setAlwaysOnTop(true);
                         mainWindow.focus();
                     }
                 }, 200);
-                
+
                 // Third attempt for stubborn cases
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.setFullScreen(true);
-                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setSkipTaskbar(false);
+                        //mainWindow.setFullScreen(false);
+                        //mainWindow.setAlwaysOnTop(true);
                         mainWindow.focus();
                     }
                 }, 500);
-                
+
                 // Fourth attempt for very stubborn cases
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(true);
-                        mainWindow.setFullScreen(true);
-                        mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setSkipTaskbar(false);
+                        //mainWindow.setFullScreen(false);
+                        //mainWindow.setAlwaysOnTop(true);
                         mainWindow.focus();
                     }
                 }, 1000);
             }
         }
     });
-    
+
     mainWindow.loadFile('index.html')
 
 
@@ -238,37 +317,41 @@ function createWindow() {
 
         if (deeplinkData) {
             console.log('Found deeplink data, sending to renderer...');
-            mainWindow.webContents.send('launch-data', deeplinkData);
-            console.log('Launch data sent from did-finish-load handler');
+            // Add a delay to ensure renderer DOMContentLoaded and handlers are ready
+            setTimeout(() => {
+                console.log('Sending launch-data IPC message from did-finish-load...');
+                mainWindow.webContents.send('launch-data', deeplinkData);
+                console.log('Launch data sent from did-finish-load handler');
+            }, 1000); // Increased delay to ensure renderer is fully ready
         } else {
             console.log('No deeplink data available yet');
         }
     });
     // Optional: Make sure window stays fullscreen even if user tries to exit
     mainWindow.on('leave-full-screen', () => {
-        mainWindow.setFullScreen(true)
+        //mainWindow.setFullScreen(false)
     })
-    
+
     // Windows-specific: Keep window focused and on top
     if (process.platform === 'win32') {
         let focusInterval = null;
         // Store dialogShowing flag on mainWindow so it's accessible from all scopes
         mainWindow._dialogShowing = false;
         let lastBlurTime = 0; // Track when blur occurred
-        
+
         // Wait for window to be ready before setting up focus management
         mainWindow.once('ready-to-show', () => {
             // Monitor window focus and keep it on top
             mainWindow.on('blur', () => {
                 const now = Date.now();
                 lastBlurTime = now;
-                
+
                 // Show warning dialog if Windows key was likely pressed (window lost focus)
                 // Only show dialog if one isn't already showing and it's been at least 2 seconds since last dialog
                 if (!mainWindow._dialogShowing && (now - (mainWindow._lastDialogTime || 0)) > 2000) {
                     mainWindow._dialogShowing = true;
                     mainWindow._lastDialogTime = now;
-                    
+
                     // Show warning dialog via SweetAlert
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.webContents.send('show-sweetalert-warning', {
@@ -280,20 +363,20 @@ function createWindow() {
                             allowEscapeKey: false
                         });
                     }
-                    
+
                     // Dialog close will be handled in renderer via IPC
                     // Set a timeout to reset dialog flag after reasonable time
                     setTimeout(() => {
                         mainWindow._dialogShowing = false;
                     }, 5000); // Reset after 5 seconds if not already reset
                 }
-                
+
                 // Immediately refocus the window if it loses focus (closes Start menu if opened)
                 // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
                 // Use multiple timeouts to catch different scenarios
-               
+
             });
-            
+
             // Prevent window from being minimized
             mainWindow.on('minimize', (event) => {
                 event.preventDefault();
@@ -306,41 +389,41 @@ function createWindow() {
                     }
                 }
             });
-            
+
             // Keep window always on top and hide taskbar (start immediately to ensure proper initial state)
             // Start checking right away, but also set up immediately
             if (process.platform === 'win32') {
                 // Immediate check and setup
                 if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.setSkipTaskbar(true);
-                    mainWindow.setFullScreen(true);
-                    mainWindow.setAlwaysOnTop(true);
+                    mainWindow.setSkipTaskbar(false);
+                    //mainWindow.setFullScreen(false);
+                    //mainWindow.setAlwaysOnTop(true);
                     mainWindow.focus();
                 }
             }
-            
+
             setTimeout(() => {
                 focusInterval = setInterval(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         try {
                             // Hide from taskbar continuously
-                            mainWindow.setSkipTaskbar(true);
-                            
+                            mainWindow.setSkipTaskbar(false);
+
                             if (!mainWindow.isFocused()) {
                                 mainWindow.focus();
                             }
                             if (!mainWindow.isAlwaysOnTop()) {
-                                mainWindow.setAlwaysOnTop(true);
+                                //mainWindow.setAlwaysOnTop(true);
                             }
                             if (!mainWindow.isFullScreen()) {
-                                mainWindow.setFullScreen(true);
+                                //mainWindow.setFullScreen(false);
                             }
-                            
+
                             // Ensure window covers entire screen including taskbar area
                             const primaryDisplay = screen.getPrimaryDisplay();
                             const currentBounds = mainWindow.getBounds();
                             const screenBounds = primaryDisplay.bounds;
-                            
+
                             // If window doesn't cover full screen, resize it
                             // if (currentBounds.width !== screenBounds.width || 
                             //     currentBounds.height !== screenBounds.height ||
@@ -361,7 +444,7 @@ function createWindow() {
                 }, 500); // Check every 500ms (more aggressive to prevent taskbar access)
             }, 100); // Start checking after 100ms (reduced from 1000ms for faster initial setup)
         });
-        
+
         // Additional aggressive blocking: Monitor for Windows key presses at lower level
         // This uses a very frequent check to catch Windows key usage and immediately refocus
         // Set this up after window is ready
@@ -372,9 +455,9 @@ function createWindow() {
                         try {
                             // Continuously ensure window is on top and taskbar is hidden
                             if (process.platform === 'win32') {
-                                mainWindow.setSkipTaskbar(true);
+                                mainWindow.setSkipTaskbar(false);
                             }
-                            
+
                             // If window loses focus (e.g., Start menu opened), immediately refocus
                             // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
                             if (!mainWindow.isFocused() && !mainWindow._dialogShowing) {
@@ -383,7 +466,7 @@ function createWindow() {
                                 if ((now - (mainWindow._lastDialogTime || 0)) > 2000) {
                                     mainWindow._dialogShowing = true;
                                     mainWindow._lastDialogTime = now;
-                                    
+
                                     // Show warning dialog via SweetAlert
                                     if (mainWindow && !mainWindow.isDestroyed()) {
                                         mainWindow.webContents.send('show-sweetalert-warning', {
@@ -395,7 +478,7 @@ function createWindow() {
                                             allowEscapeKey: false
                                         });
                                     }
-                                    
+
                                     // Dialog close will be handled in renderer via IPC
                                     // Set a timeout to reset dialog flag after reasonable time
                                     setTimeout(() => {
@@ -405,32 +488,32 @@ function createWindow() {
                                     // If dialog was shown recently, just refocus without showing another dialog
                                     mainWindow.focus();
                                     if (process.platform === 'win32') {
-                                        mainWindow.setAlwaysOnTop(true);
+                                        //mainWindow.setAlwaysOnTop(true);
                                         // Force fullscreen to close any overlays
                                         if (!mainWindow.isFullScreen()) {
-                                            mainWindow.setFullScreen(true);
+                                            //mainWindow.setFullScreen(false);
                                         }
                                     }
                                 }
                             }
-                            
+
                             // Ensure window covers full screen and taskbar is hidden
                             if (process.platform === 'win32') {
                                 const primaryDisplay = screen.getPrimaryDisplay();
                                 const currentBounds = mainWindow.getBounds();
                                 const screenBounds = primaryDisplay.bounds;
-                                
+
                                 // Always ensure taskbar is hidden
-                                mainWindow.setSkipTaskbar(true);
-                                
+                                mainWindow.setSkipTaskbar(false);
+
                                 // Ensure fullscreen is maintained
                                 if (!mainWindow.isFullScreen()) {
-                                    mainWindow.setFullScreen(true);
+                                    //mainWindow.setFullScreen(false);
                                 }
-                                
+
                                 // Ensure always on top is maintained
                                 if (!mainWindow.isAlwaysOnTop()) {
-                                    mainWindow.setAlwaysOnTop(true);
+                                    //mainWindow.setAlwaysOnTop(true);
                                 }
                             }
                         } catch (error) {
@@ -440,12 +523,12 @@ function createWindow() {
                         clearInterval(aggressiveFocusInterval);
                     }
                 }, 50); // Check every 50ms - very aggressive to catch Start menu immediately
-                
+
                 // Store interval for cleanup
                 mainWindow._aggressiveFocusInterval = aggressiveFocusInterval;
             }, 200); // Start aggressive monitoring after 200ms (reduced from 1500ms for faster response)
         });
-        
+
         // Clean up intervals on window close
         mainWindow.on('closed', () => {
             if (focusInterval) {
@@ -472,49 +555,49 @@ function createWindow() {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Alt+Esc
             if (input.key === 'Escape' && input.alt) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Windows key combinations
             if (input.key === 'Meta' || input.key === 'Super') {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Ctrl+Esc (opens Start menu)
             if (input.key === 'Escape' && input.control) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Win+D (show desktop)
             if (input.key === 'd' && input.meta) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Win+R (run dialog)
             if (input.key === 'r' && input.meta) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Win+E (file explorer)
             if (input.key === 'e' && input.meta) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Win+L (lock screen)
             if (input.key === 'l' && input.meta) {
                 event.preventDefault();
                 return;
             }
-            
+
             // Block Win+M (minimize all)
             if (input.key === 'm' && input.meta) {
                 event.preventDefault();
@@ -525,7 +608,7 @@ function createWindow() {
         // Allow DevTools shortcuts (Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS)
         // Removed blocking to allow toggling DevTools
     });
-    
+
     // Handle failed loads (including iframe errors)
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
         // Only handle main frame errors, iframe errors are handled in renderer
@@ -564,7 +647,7 @@ function createWindow() {
                 allowOutsideClick: false,
                 allowEscapeKey: false
             });
-            
+
             // Listen for response
             const handler = (event, confirmed) => {
                 ipcMain.removeListener('sweetalert-confirm-response', handler);
@@ -581,56 +664,15 @@ function createWindow() {
 
 }
 
+// macOS-specific: Handle open-url event
 app.on('open-url', (event, url) => {
     event.preventDefault();
-    console.log('Got URL:', url);
-
-    try {
-        const parsed = new URL(url);
-        const parts = parsed.pathname.split('/').filter(Boolean); // Remove empty strings
-        console.log('URL parts:', parts);
-
-        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
-        // The 'e-quiz' is part of the hostname, not pathname
-        // examType is either 'resit' or 'exam'
-        if (parts.length >= 6) {
-            const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
-            deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId, examType };
-            console.log('Parsed deeplink data:', deeplinkData);
-
-            if (mainWindow) {
-                console.log('Main window found, sending data...');
-                // Focus the window
-                if (mainWindow.isMinimized()) {
-                    console.log('Window was minimized, restoring...');
-                    mainWindow.restore();
-                }
-                mainWindow.focus();
-                console.log('Window focused');
-
-                // Send data when window is ready
-                if (mainWindow.webContents.isLoading()) {
-                    console.log('Window is still loading, waiting for did-finish-load...');
-                    mainWindow.webContents.once('did-finish-load', () => {
-                        console.log('Window finished loading, sending launch data...');
-                        mainWindow.webContents.send('launch-data', deeplinkData);
-                        console.log('Launch data sent successfully');
-                    });
-                } else {
-                    console.log('Window already loaded, sending launch data immediately...');
-                    // Send a test message first to verify IPC is working
-                    mainWindow.webContents.send('test-message', 'IPC test from main process');
-                    mainWindow.webContents.send('launch-data', deeplinkData);
-                    console.log('Launch data sent successfully');
-                }
-            } else {
-                console.error('Main window not found');
-            }
-        } else {
-            console.error('Invalid URL structure. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
-        }
-    } catch (err) {
-        console.error('Invalid URL:', err);
+    console.log('Got URL (macOS):', url);
+    const data = parseDeeplinkUrl(url);
+    if (data) {
+        deeplinkData = data;
+        console.log('Parsed deeplink data:', deeplinkData);
+        sendLaunchDataToRenderer(deeplinkData);
     }
 });
 
@@ -641,19 +683,19 @@ app.on('web-contents-created', (_, contents) => {
         if (input.key === 'Tab') {
             event.preventDefault();
         }
-        
+
         // Windows-specific: Block escape mechanisms
         if (process.platform === 'win32') {
             // Block Alt+Tab
             if (input.key === 'Tab' && input.alt) {
                 event.preventDefault();
             }
-            
+
             // Block Windows key
             if (input.key === 'Meta' || input.key === 'Super') {
                 event.preventDefault();
             }
-            
+
             // Block Ctrl+Esc
             if (input.key === 'Escape' && input.control) {
                 event.preventDefault();
@@ -682,55 +724,16 @@ app.on('activate', () => {
     // if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-// Handle second-instance (for Windows)
+// Handle second-instance (for Windows - when app is already running)
 app.on('second-instance', (event, argv) => {
     const url = argv.find((arg) => arg.startsWith('proctorx://'));
     if (url) {
-        console.log('Second instance URL:', url);
-        try {
-            const u = new URL(url);
-            const parts = u.pathname.split('/').filter(Boolean);
-            console.log('Second instance URL parts:', parts);
-
-            // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
-            // The 'e-quiz' is part of the hostname, not pathname
-            // examType is either 'resit' or 'exam'
-            if (parts.length >= 6) {
-                const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
-                deeplinkData = { quizId, studentId, tkn, sqid: studentQuizId, examType };
-                console.log('Second instance parsed deeplink data:', deeplinkData);
-
-                if (mainWindow) {
-                    console.log('Main window found, focusing and sending data...');
-                    // Focus the existing window
-                    if (mainWindow.isMinimized()) {
-                        console.log('Window was minimized, restoring...');
-                        mainWindow.restore();
-                    }
-                    mainWindow.focus();
-                    console.log('Window focused');
-
-                    // Send data when window is ready
-                    if (mainWindow.webContents.isLoading()) {
-                        console.log('Window is still loading, waiting for did-finish-load...');
-                        mainWindow.webContents.once('did-finish-load', () => {
-                            console.log('Window finished loading, sending launch data...');
-                            mainWindow.webContents.send('launch-data', deeplinkData);
-                            console.log('Launch data sent successfully');
-                        });
-                    } else {
-                        console.log('Window already loaded, sending launch data immediately...');
-                        mainWindow.webContents.send('launch-data', deeplinkData);
-                        console.log('Launch data sent successfully');
-                    }
-                } else {
-                    console.error('Main window not found in second instance');
-                }
-            } else {
-                console.error('Invalid URL structure in second instance. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
-            }
-        } catch (err) {
-            console.error('Invalid URL in second instance:', err);
+        console.log('Second instance URL (Windows):', url);
+        const data = parseDeeplinkUrl(url);
+        if (data) {
+            deeplinkData = data;
+            console.log('Second instance parsed deeplink data:', deeplinkData);
+            sendLaunchDataToRenderer(deeplinkData);
         }
     }
 });
@@ -867,7 +870,7 @@ function setupDisplayMonitoring() {
         if (!mainWindow || mainWindow.isDestroyed()) {
             return;
         }
-        
+
         const displays = screen.getAllDisplays();
         console.log(`Display added. Total displays: ${displays.length}`);
         if (displays.length >= 2 && !multipleDisplayAlertShowing) {
@@ -891,10 +894,10 @@ function setupDisplayMonitoring() {
         if (!mainWindow || mainWindow.isDestroyed()) {
             return;
         }
-        
+
         const displays = screen.getAllDisplays();
         console.log(`Display removed. Total displays: ${displays.length}`);
-        
+
         // Auto-dismiss alert when display count becomes 1
         if (displays.length === 1 && multipleDisplayAlertShowing) {
             // Flag will be reset when renderer confirms closure
@@ -907,10 +910,10 @@ function setupDisplayMonitoring() {
         if (!mainWindow || mainWindow.isDestroyed()) {
             return;
         }
-        
+
         const displays = screen.getAllDisplays();
         console.log(`Display metrics changed. Total displays: ${displays.length}`);
-        
+
         // Check if we need to show or hide the alert
         if (displays.length >= 2 && !multipleDisplayAlertShowing) {
             // Show non-dismissable SweetAlert warning
@@ -934,6 +937,38 @@ function setupDisplayMonitoring() {
 }
 
 app.whenReady().then(() => {
+    // Check for deep link URL in command line arguments (Windows initial launch)
+    console.log('🔍 Checking process.argv for deep link URL...');
+    console.log('🔍 process.argv:', process.argv);
+    console.log('🔍 process.platform:', process.platform);
+    
+    if (process.platform === 'win32') {
+        const url = process.argv.find((arg) => arg.startsWith('proctorx://'));
+        if (url) {
+            console.log('✅ Found deep link URL in command line (Windows initial launch):', url);
+            const data = parseDeeplinkUrl(url);
+            if (data) {
+                deeplinkData = data;
+                console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+            } else {
+                console.error('❌ Failed to parse deeplink data from command line');
+            }
+        } else {
+            console.log('ℹ️ No deep link URL found in process.argv');
+        }
+    } else {
+        // Also check for macOS/Linux
+        const url = process.argv.find((arg) => arg.startsWith('proctorx://'));
+        if (url) {
+            console.log('✅ Found deep link URL in command line:', url);
+            const data = parseDeeplinkUrl(url);
+            if (data) {
+                deeplinkData = data;
+                console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+            }
+        }
+    }
+    
     // Setup display monitoring
     setupDisplayMonitoring();
 
@@ -946,7 +981,7 @@ app.whenReady().then(() => {
                 const ret = globalShortcut.register(accelerator, () => {
                     console.log(`${description} blocked`);
                     // Immediately refocus our window
-                     
+
                     return false;
                 });
                 if (!ret) {
@@ -958,45 +993,45 @@ app.whenReady().then(() => {
                 console.error(`Error registering shortcut ${accelerator}:`, error);
             }
         };
-        
+
         // Block Alt+Tab
         registerShortcut('Alt+Tab', 'Alt+Tab');
-        
+
         // Block Alt+Esc
         registerShortcut('Alt+Esc', 'Alt+Esc');
-        
+
         // Block Ctrl+Esc
         registerShortcut('Ctrl+Esc', 'Ctrl+Esc');
-        
+
         // Block Win+D (show desktop)
         registerShortcut('Super+D', 'Win+D');
-        
+
         // Block Win+R (run dialog)
         registerShortcut('Super+R', 'Win+R');
-        
+
         // Block Win+E (file explorer)
         registerShortcut('Super+E', 'Win+E');
-        
+
         // Block Win+L (lock screen)
         registerShortcut('Super+L', 'Win+L');
-        
+
         // Block Win+M (minimize all)
         registerShortcut('Super+M', 'Win+M');
-        
+
         // Block Win+X (power user menu)
         registerShortcut('Super+X', 'Win+X');
-        
+
         // Block Win+Tab (Task View)
         registerShortcut('Super+Tab', 'Win+Tab');
-        
+
         // Block Win+Space (switch input language)
         registerShortcut('Super+Space', 'Win+Space');
-        
+
         // Block Win+Number keys (open taskbar apps)
         for (let i = 1; i <= 9; i++) {
             registerShortcut(`Super+${i}`, `Win+${i}`);
         }
-        
+
         // Additional aggressive blocking will be set up after window is created
         // (moved to createWindow function to avoid accessing mainWindow before it exists)
     }
@@ -1010,7 +1045,7 @@ app.whenReady().then(() => {
                 console.log('Exit blocked: Multiple displays detected');
                 return;
             }
-            
+
             // Show confirmation dialog before quitting
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('show-sweetalert-confirm', {
@@ -1023,7 +1058,7 @@ app.whenReady().then(() => {
                     allowOutsideClick: false,
                     allowEscapeKey: false
                 });
-                
+
                 // Listen for response
                 const handler = (event, confirmed) => {
                     ipcMain.removeListener('sweetalert-confirm-response', handler);
