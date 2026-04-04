@@ -16,14 +16,15 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder build --windows  ",
+    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac",
+    "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:all": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --win --linux"
   },
   "build": {
     "appId": "com.cps.proctorx",
-    "productName": "Proctor X",
+    "productName": "ProctorX",
     "copyright": "Copyright © 2025 CPS",
     "directories": {
       "output": "dist"
@@ -68,6 +69,10 @@
       "!node_modules/**/*.md"
     ],
     "asar": true,
+    "electronLanguages": [
+      "en"
+    ],
+    "afterSign": "scripts/notarize.js",
     "protocols": [
       {
         "name": "ProctorX",
@@ -77,10 +82,17 @@
       }
     ],
     "mac": {
-      "category": "public.app-category.education",
+      "category": "public.app-category.utilities",
       "target": "dmg",
       "icon": "assets/icon.icns",
-      "identity": null
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "gatekeeperAssess": true,
+      "identity": "BF1405DE5526BB8249B59D3B3B250031818F9213",
+      "signIgnore": [
+        "locale\\.pak$"
+      ]
     },
     "win": {
       "target": [
@@ -119,6 +131,7 @@
     "sweetalert2": "^11.26.3"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "electron": "^37.2.1",
     "electron-builder": "^26.0.12"
   }

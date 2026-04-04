@@ -9,3 +9,5 @@ dist/
 .DS_Store
 .env
 *.log
+build/credentials/*.p12
+*.p12
