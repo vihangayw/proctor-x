@@ -2,6 +2,9 @@
 
 This project builds a signed macOS DMG for `ProctorX` and verifies that the packaged app is accepted by Gatekeeper.
 
+The `build` script now uses a custom DMG creation step in `scripts/build-mac-dmg.js` because
+`hdiutil create -srcfolder <app>.app` was failing on this machine even though the app bundle itself was valid.
+
 ## 1. Set Apple Credentials
 
 Run these before building:
@@ -18,6 +21,11 @@ export APPLE_TEAM_ID="9YCZ8LY842"
 ```sh
 npm run build
 ```
+
+This does two things:
+
+- builds and notarizes `dist/mac-arm64/ProctorX.app`
+- creates `dist/ProctorX-1.0.1-arm64.dmg` using the custom mount-and-copy DMG builder
 
 This generates:
 
@@ -117,6 +125,7 @@ source=Notarized Developer ID
 ## Notes
 
 - The app is configured with `afterSign` notarization support in `scripts/notarize.js`.
+- The DMG is created by `scripts/build-mac-dmg.js`, not by `electron-builder`'s built-in DMG target.
 - `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_APP_PASSWORD` are currently set to the same value.
 - The mounted DMG volume name in this project is `ProctorX 1.0.1-arm64`, so the verification path should match that
   exact volume name.

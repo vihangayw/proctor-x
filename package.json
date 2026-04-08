@@ -16,7 +16,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac",
+    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac dir && node scripts/build-mac-dmg.js",
     "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
@@ -83,7 +83,7 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dmg",
+      "target": "dir",
       "icon": "assets/icon.icns",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",

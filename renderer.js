@@ -129,61 +129,27 @@ const openScreenShare = async (quizId, examInfo, sqid) => {
         }
 
         console.log('-------Selected source:', selectedSource);
-        console.log('🎥 Attempting to get screen stream using getDisplayMedia...');
+        console.log('🎥 Attempting to get screen stream using Electron desktop capturer...');
 
-        // Use getDisplayMedia for proper screen sharing
-        try {
-            stream = await navigator.mediaDevices.getDisplayMedia({
-                audio: false,
-                video: true
-            });
-
-            console.log('✅ Screen stream obtained using getDisplayMedia');
-        } catch (error) {
-            console.error('❌ getDisplayMedia failed:', error.name, error.message);
-
-            if (error.name === 'InvalidStateError' && error.message.includes('transient activation')) {
-                console.error('❌ Screen sharing requires user gesture. Please click a button first.');
-            } else if (error.name === 'NotReadableError') {
-                console.error('❌ Screen capture source not readable. This might be due to:');
-                console.error('   - Screen recording permissions not granted');
-                console.error('   - Another app using screen capture');
-                console.error('   - System restrictions');
+        // Use getUserMedia with Electron's desktop capturer source ID.
+        // This routes through the main process (which holds the macOS screen recording
+        // TCC permission), avoiding the separate TCC prompt that getDisplayMedia()
+        // triggers for the renderer helper process.
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+                mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: selectedSource.id,
+                    minWidth: 960,
+                    maxWidth: 960,
+                    minHeight: 540,
+                    maxHeight: 540,
+                    maxFrameRate: 15,
+                }
             }
-
-            // Fallback to Electron's desktop capturer
-            console.log('🔄 Falling back to Electron desktop capturer...');
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop',
-                            chromeMediaSourceId: selectedSource.id,
-                            minWidth: 960,
-                            maxWidth: 960,
-                            minHeight: 540,
-                            maxHeight: 540,
-                            maxFrameRate: 15,
-                        }
-                    }
-                });
-                console.log('✅ Screen stream obtained using Electron desktop capturer fallback');
-                console.log('📺 Fallback stream details:', {
-                    id: stream.id,
-                    active: stream.active,
-                    tracks: stream.getTracks().map(track => ({
-                        kind: track.kind,
-                        label: track.label,
-                        enabled: track.enabled,
-                        readyState: track.readyState
-                    }))
-                });
-            } catch (fallbackError) {
-                console.error('❌ Electron desktop capturer fallback also failed:', fallbackError.name, fallbackError.message);
-                throw new Error(`Both getDisplayMedia and desktop capturer failed. getDisplayMedia: ${error.message}, Desktop capturer: ${fallbackError.message}`);
-            }
-        }
+        });
+        console.log('✅ Screen stream obtained using Electron desktop capturer');
 
         // 🟢 Detect when screen sharing stops
         stream.getVideoTracks()[0].addEventListener('ended', async () => {

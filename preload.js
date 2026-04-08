@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreWindowState: () => ipcRenderer.send('restore-window-state'),
   getPlatform: () => process.platform,
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getScreenAccessStatus: () => ipcRenderer.invoke('get-screen-access-status'),
+  openScreenCaptureSettings: () => ipcRenderer.invoke('open-screen-capture-settings'),
     // Add method to get display media stream from Electron
     getDisplayMedia: () => ipcRenderer.invoke('get-display-media'),
   // Status bar APIs

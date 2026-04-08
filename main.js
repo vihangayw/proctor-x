@@ -6,7 +6,6 @@ const { globalShortcut } = require('electron');
 // Enable screen capture in Electron
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
 app.commandLine.appendSwitch('allow-http-screen-capture')
-app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 app.commandLine.appendSwitch('disable-site-isolation-trials')
 
 let mainWindow
@@ -747,6 +746,33 @@ ipcMain.handle('get-sources', async () => {
     return await desktopCapturer.getSources({ types: ['window', 'screen'] })
 })
 
+ipcMain.handle('get-screen-access-status', async () => {
+    if (process.platform !== 'darwin') {
+        return 'granted';
+    }
+
+    try {
+        return systemPreferences.getMediaAccessStatus('screen');
+    } catch (error) {
+        console.error('Error checking screen recording permission:', error);
+        return 'unknown';
+    }
+})
+
+ipcMain.handle('open-screen-capture-settings', async () => {
+    if (process.platform !== 'darwin') {
+        return false;
+    }
+
+    try {
+        await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        return true;
+    } catch (error) {
+        console.error('Error opening screen recording settings:', error);
+        return false;
+    }
+})
+
 // Handle getting display media stream
 ipcMain.handle('get-display-media', async () => {
     try {
@@ -971,6 +997,17 @@ app.whenReady().then(() => {
     
     // Setup display monitoring
     setupDisplayMonitoring();
+
+    // macOS: proactively request camera and microphone permissions so TCC prompts
+    // appear at launch rather than mid-exam. Screen recording permission is
+    // triggered automatically when desktopCapturer.getSources() is called.
+    if (process.platform === 'darwin') {
+        const {systemPreferences} = require('electron');
+        systemPreferences.askForMediaAccess('camera').catch(() => {
+        });
+        systemPreferences.askForMediaAccess('microphone').catch(() => {
+        });
+    }
 
     // Windows-specific: Register global shortcuts to block Windows key combinations
     // Do this after window creation to avoid blocking startup
