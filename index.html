@@ -112,6 +112,145 @@
         position: relative;
     }
 
+    /* Permission overlay */
+    #permissionOverlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 40, 60, 0.97);
+        z-index: 99999;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Inter', Arial, sans-serif;
+    }
+
+    #permissionOverlay.visible {
+        display: flex;
+    }
+
+    .perm-card {
+        background: #fff;
+        border-radius: 16px;
+        padding: 40px 44px;
+        max-width: 480px;
+        width: 100%;
+        text-align: center;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .perm-card img {
+        width: 72px;
+        margin-bottom: 12px;
+    }
+
+    .perm-card h2 {
+        color: #024565;
+        font-size: 1.3rem;
+        margin-bottom: 8px;
+    }
+
+    .perm-card p {
+        color: #555;
+        font-size: 0.9rem;
+        margin-bottom: 24px;
+    }
+
+    .perm-list {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 28px;
+        text-align: left;
+    }
+
+    .perm-list li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #222;
+        background: #f5f7fa;
+        border: 1.5px solid #e0e4ea;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .perm-list li:hover {
+        background: #eaf0fb;
+    }
+
+    .perm-list li .perm-icon {
+        font-size: 1.3rem;
+    }
+
+    .perm-list li .perm-status {
+        margin-left: auto;
+        font-size: 0.8rem;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 20px;
+    }
+
+    .perm-list li .perm-status.granted {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+
+    .perm-list li .perm-status.denied {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    .perm-list li .perm-status.checking {
+        background: #fff8e1;
+        color: #f57f17;
+    }
+
+    .perm-error {
+        display: none;
+        background: #ffebee;
+        border: 1.5px solid #ef9a9a;
+        border-radius: 10px;
+        color: #c62828;
+        font-size: 0.85rem;
+        padding: 12px 16px;
+        margin-bottom: 20px;
+        text-align: left;
+    }
+
+    .perm-error.visible {
+        display: block;
+    }
+
+    .perm-btn {
+        width: 100%;
+        padding: 13px;
+        border: none;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        margin-bottom: 10px;
+        transition: opacity 0.15s;
+    }
+
+    .perm-btn:hover {
+        opacity: 0.88;
+    }
+
+    .perm-btn-primary {
+        background: #024565;
+        color: #fff;
+    }
+
+    .perm-btn-secondary {
+        background: #93ba49;
+        color: #fff;
+    }
+
     /* Status Bar - Top Right Corner */
     #statusBar {
         position: fixed;
@@ -189,6 +328,44 @@
     </div>
 </div>
 
+<!-- Permission check overlay — shown on first launch until all permissions are granted -->
+<div id="permissionOverlay">
+    <div class="perm-card">
+        <img src="./logo.png" alt="ProctorX">
+        <h2>Permissions Required</h2>
+        <p>ProctorX needs the following permissions before your exam can begin. Click any denied item to open
+            Settings.</p>
+        <ul class="perm-list">
+            <li id="perm-camera" onclick="openSettings('camera')">
+                <span class="perm-icon">📷</span>
+                <span>Camera</span>
+                <span class="perm-status checking" id="perm-camera-status">Checking…</span>
+            </li>
+            <li id="perm-microphone" onclick="openSettings('microphone')">
+                <span class="perm-icon">🎙️</span>
+                <span>Microphone</span>
+                <span class="perm-status checking" id="perm-microphone-status">Checking…</span>
+            </li>
+            <li id="perm-screen" onclick="openSettings('screen')">
+                <span class="perm-icon">🖥️</span>
+                <span>Screen Recording</span>
+                <span class="perm-status checking" id="perm-screen-status">Checking…</span>
+            </li>
+        </ul>
+        <div class="perm-error" id="permError">
+            One or more permissions are denied. Click the denied item above to open System Settings, grant access to
+            <strong>ProctorX</strong>, then click <strong>Retry</strong>.
+        </div>
+        <button class="perm-btn perm-btn-primary" onclick="retryPermissions()">Retry</button>
+        <button class="perm-btn perm-btn-secondary" onclick="openSettings('screen')">Open Privacy &amp; Security
+            Settings
+        </button>
+        <button class="perm-btn" style="background:#e0e4ea;color:#555;" onclick="window.electronAPI.forceQuitApp()">Quit
+            ProctorX
+        </button>
+    </div>
+</div>
+
 <div class="controls">
   <button id="shareScreen">Share Screen</button>
   <button id="stopShare" disabled>Stop Sharing</button>
@@ -218,6 +395,95 @@
         </div>
     </div>
 </div>
+
+<!-- Permission check logic (runs before renderer module) -->
+<script>
+    function setPermStatus(id, status) {
+        const el = document.getElementById('perm-' + id + '-status');
+        if (!el) return;
+        el.className = 'perm-status ' + (status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'checking');
+        el.textContent = status === 'granted' ? 'Granted ✓' : status === 'denied' ? 'Denied ✗' : 'Checking…';
+    }
+
+    function openSettings(type) {
+        if (window.electronAPI && window.electronAPI.openPrivacySettings) {
+            window.electronAPI.openPrivacySettings(type);
+        }
+    }
+
+    async function checkPermissions() {
+        const overlay = document.getElementById('permissionOverlay');
+        const errBox = document.getElementById('permError');
+
+        overlay.classList.add('visible');
+        errBox.classList.remove('visible');
+
+        setPermStatus('camera', 'checking');
+        setPermStatus('microphone', 'checking');
+        setPermStatus('screen', 'checking');
+
+        // Step 1: request camera + mic via getUserMedia (triggers OS dialog on first run)
+        let cameraOk = false, micOk = false;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+            stream.getTracks().forEach(t => t.stop());
+            cameraOk = true;
+            micOk = true;
+        } catch (err) {
+            // Try them individually to distinguish which is denied
+            try {
+                const vs = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
+                vs.getTracks().forEach(t => t.stop());
+                cameraOk = true;
+            } catch {
+            }
+            try {
+                const as = await navigator.mediaDevices.getUserMedia({video: false, audio: true});
+                as.getTracks().forEach(t => t.stop());
+                micOk = true;
+            } catch {
+            }
+        }
+
+        // Step 2: trigger screen recording TCC prompt via main process
+        let screenOk = false;
+        try {
+            screenOk = await window.electronAPI.requestScreenPermission();
+        } catch {
+        }
+
+        // Step 3: read authoritative macOS TCC status (overrides getUserMedia result on macOS)
+        if (window.electronAPI && window.electronAPI.getMediaAccessStatus) {
+            try {
+                const s = await window.electronAPI.getMediaAccessStatus();
+                cameraOk = s.camera === 'granted';
+                micOk = s.microphone === 'granted';
+                screenOk = s.screen === 'granted';
+            } catch {
+            }
+        }
+
+        setPermStatus('camera', cameraOk ? 'granted' : 'denied');
+        setPermStatus('microphone', micOk ? 'granted' : 'denied');
+        setPermStatus('screen', screenOk ? 'granted' : 'denied');
+
+        if (cameraOk && micOk && screenOk) {
+            overlay.classList.remove('visible');
+        } else {
+            errBox.classList.add('visible');
+        }
+    }
+
+    function retryPermissions() {
+        checkPermissions();
+    }
+
+    // Run after the preload bridge is ready
+    document.addEventListener('DOMContentLoaded', () => {
+        // Small delay to ensure electronAPI is bridged
+        setTimeout(checkPermissions, 300);
+    });
+</script>
 
 <!-- LiveKit Scripts -->
 <script type="module" src="renderer.js"></script>

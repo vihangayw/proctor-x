@@ -1,4 +1,16 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, dialog, nativeImage, session, screen, TouchBar } = require('electron')
+const {
+    app,
+    BrowserWindow,
+    ipcMain,
+    desktopCapturer,
+    dialog,
+    nativeImage,
+    session,
+    screen,
+    TouchBar,
+    systemPreferences,
+    shell
+} = require('electron')
 const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
@@ -750,7 +762,6 @@ ipcMain.handle('get-screen-access-status', async () => {
     if (process.platform !== 'darwin') {
         return 'granted';
     }
-
     try {
         return systemPreferences.getMediaAccessStatus('screen');
     } catch (error) {
@@ -759,16 +770,54 @@ ipcMain.handle('get-screen-access-status', async () => {
     }
 })
 
+// Returns {camera, microphone, screen} permission statuses.
+// On non-macOS platforms all return 'granted'.
+ipcMain.handle('get-media-access-status', async () => {
+    if (process.platform !== 'darwin') {
+        return {camera: 'granted', microphone: 'granted', screen: 'granted'};
+    }
+    return {
+        camera: systemPreferences.getMediaAccessStatus('camera'),
+        microphone: systemPreferences.getMediaAccessStatus('microphone'),
+        screen: systemPreferences.getMediaAccessStatus('screen'),
+    };
+})
+
+// Trigger the screen recording TCC prompt by attempting getSources.
+// Returns true if at least one source was returned (permission granted).
+ipcMain.handle('request-screen-permission', async () => {
+    try {
+        const sources = await desktopCapturer.getSources({types: ['screen']});
+        return sources.length > 0;
+    } catch {
+        return false;
+    }
+})
+
 ipcMain.handle('open-screen-capture-settings', async () => {
     if (process.platform !== 'darwin') {
         return false;
     }
-
     try {
         await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
         return true;
     } catch (error) {
         console.error('Error opening screen recording settings:', error);
+        return false;
+    }
+})
+
+ipcMain.handle('open-privacy-settings', async (_, type) => {
+    const urls = {
+        camera: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera',
+        microphone: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+        screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+    };
+    const url = urls[type] || 'x-apple.systempreferences:com.apple.preference.security?Privacy';
+    try {
+        await shell.openExternal(url);
+        return true;
+    } catch {
         return false;
     }
 })
@@ -867,6 +916,12 @@ ipcMain.handle('show-dialog', async (_, options) => {
     })
     return result.response // Returns 0 for OK, 1 for Cancel
 })
+
+// Force quit — bypasses the window close event (used from permission overlay)
+ipcMain.on('force-quit-app', () => {
+    console.log('Force quit command received');
+    app.exit(0);
+});
 
 ipcMain.on('quit-app', () => {
     console.log('Quit command received') // Debug log
@@ -997,17 +1052,6 @@ app.whenReady().then(() => {
     
     // Setup display monitoring
     setupDisplayMonitoring();
-
-    // macOS: proactively request camera and microphone permissions so TCC prompts
-    // appear at launch rather than mid-exam. Screen recording permission is
-    // triggered automatically when desktopCapturer.getSources() is called.
-    if (process.platform === 'darwin') {
-        const {systemPreferences} = require('electron');
-        systemPreferences.askForMediaAccess('camera').catch(() => {
-        });
-        systemPreferences.askForMediaAccess('microphone').catch(() => {
-        });
-    }
 
     // Windows-specific: Register global shortcuts to block Windows key combinations
     // Do this after window creation to avoid blocking startup

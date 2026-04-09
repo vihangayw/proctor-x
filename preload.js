@@ -4,6 +4,7 @@ const {contextBridge, ipcRenderer} = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getSources: () => ipcRenderer.invoke('get-sources'),
   quitApp: () => ipcRenderer.send('quit-app'),
+  forceQuitApp: () => ipcRenderer.send('force-quit-app'),
   showDialog: (options) => ipcRenderer.invoke('show-dialog', options),
   showWarningDialog: (options) => ipcRenderer.send('show-warning-dialog', options),
     // onQuizData: (callback) => ipcRenderer.on('quiz-data', (event, data) => callback(data)),
@@ -24,7 +25,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getPlatform: () => process.platform,
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getScreenAccessStatus: () => ipcRenderer.invoke('get-screen-access-status'),
+  getMediaAccessStatus: () => ipcRenderer.invoke('get-media-access-status'),
+  requestScreenPermission: () => ipcRenderer.invoke('request-screen-permission'),
   openScreenCaptureSettings: () => ipcRenderer.invoke('open-screen-capture-settings'),
+  openPrivacySettings: (type) => ipcRenderer.invoke('open-privacy-settings', type),
     // Add method to get display media stream from Electron
     getDisplayMedia: () => ipcRenderer.invoke('get-display-media'),
   // Status bar APIs
