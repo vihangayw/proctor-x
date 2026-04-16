@@ -2,8 +2,8 @@
   "name": "ProctorX",
   "productName": "ProctorX",
   "version": "1.0.1",
-  "description": "Electron application for online exams",
-  "author": "Your Name <your.email@example.com>",
+  "description": "LMS based online secure exam application",
+  "author": "VihangaWicks vyasith@gmail.com",
   "license": "ISC",
   "homepage": "https://your-company.com/exam-app",
   "repository": {
@@ -16,7 +16,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac dir && node scripts/build-mac-dmg.js",
+    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac",
     "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
@@ -24,8 +24,8 @@
   },
   "build": {
     "appId": "com.cps.proctorx",
-    "productName": "ProctorX",
-    "copyright": "Copyright © 2025 CPS",
+    "productName": "Proctor-X",
+    "copyright": "Copyright © 2026 MC",
     "directories": {
       "output": "dist"
     },
@@ -69,9 +69,6 @@
       "!node_modules/**/*.md"
     ],
     "asar": true,
-    "electronLanguages": [
-      "en"
-    ],
     "afterSign": "scripts/notarize.js",
     "protocols": [
       {
@@ -83,7 +80,7 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "target": "dir",
+      "target": "dmg",
       "icon": "assets/icon.icns",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
@@ -95,7 +92,7 @@
       ]
     },
     "dmg": {
-      "background": "build/dmg-background.png",
+      "background": "build/dmg-bg.png",
       "format": "ULFO",
       "iconSize": 120,
       "window": {
