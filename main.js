@@ -15,11 +15,6 @@ const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
 
-// Must be set before app is ready — tells Windows which icon/name to use in taskbar & Start
-if (process.platform === 'win32') {
-    app.setAppUserModelId('com.cps.proctorx');
-}
-
 // Enable screen capture in Electron
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
 app.commandLine.appendSwitch('allow-http-screen-capture')
@@ -97,7 +92,7 @@ function parseDeeplinkUrl(url) {
 // Helper function to send launch data to renderer
 function sendLaunchDataToRenderer(data) {
     if (!data) return;
-
+    
     if (mainWindow) {
         console.log('Main window found, sending data...');
         // Focus the window
@@ -156,102 +151,76 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        // --- Kiosk / fullscreen ---
-        kiosk: true,
-        fullscreen: true,
-        // --- Window chrome ---
-        frame: false,
-        titleBarStyle: 'hidden',
-        autoHideMenuBar: true,
-        hasShadow: false,
-        roundedCorners: false,      // macOS 12+ — square corners in kiosk
-        thickFrame: false,          // Windows — remove resize/snap border
-        backgroundColor: '#000000', // Eliminate white flash before renderer loads
-        // --- Interaction locks ---
-        alwaysOnTop: true,
-        movable: false,
-        resizable: false,
-        minimizable: false,
-        maximizable: false,
-        closable: false,
-        skipTaskbar: true,          // Hide from Windows taskbar / macOS dock switcher
-        focusable: true,            // Must remain focusable to receive key events
+        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: true, // Keep window on top of others
+        movable: false, // Prevent window movement
+        minimizable: false, // Disable minimize button
+        maximizable: false, // Disable maximize button
+        closable: false, // Enable close button
+        titleBarStyle: 'hidden', // Alternative to frame: false on macOS
+        autoHideMenuBar: true,// Alternative for menu visibility
+        // width: 1000, // Default width (will be overridden by fullscreen)
+        // height: 800, // Default height (will be overridden by fullscreen)
+        fullscreen: true, // Enable fullscreen mode
+        resizable: false, // Disable window resizing
+        frame: false, // Remove window frame (including close/minimize buttons)
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
-            sandbox: false,                    // Required for screen sharing
-            webSecurity: false,                // Required for getDisplayMedia in dev
+            enableRemoteModule: false,
+            sandbox: false, // Disable sandbox for screen sharing
+            webSecurity: false, // Disable for development to allow getDisplayMedia
             allowRunningInsecureContent: true,
             experimentalFeatures: true,
             nodeIntegration: false,
             nodeIntegrationInWorker: false,
             nodeIntegrationInSubFrames: false,
-            navigateOnDragDrop: false,         // Prevent drag-URL navigation
-            spellcheck: false,                 // No spellcheck UI in exam
-            disableBlinkFeatures: 'Auxclick',  // Block middle-click navigation
-            // Required for screen capture
+            // ✅ Required for screen capture
             media: {
                 audio: true,
                 video: true,
                 videoCapture: true,
                 audioCapture: true,
             },
+            // webSecurity: true,
+            // ✅ These two flags are critical:
             permissions: ['display-capture'],
+            // allowRunningInsecureContent: false,
         },
         icon: iconPath
     })
 
+    // Remove application menu
     const remoteMain = require('@electron/remote/main');
     remoteMain.enable(mainWindow.webContents);
 
     app.setAsDefaultProtocolClient('proctorx');
 
-    mainWindow.setMenu(null);
-
     // Open DevTools in development
     // if (!app.isPackaged) {
-    mainWindow.webContents.openDevTools()
+        mainWindow.webContents.openDevTools()
     // }
+    // mainWindow.setMenu(null) // Remove menu bar
 
-    // --- Platform-specific hardening ---
+    // Disable Touch Bar on macOS by creating an empty TouchBar
+    // This overrides system-level Touch Bar items like "now playing"
     if (process.platform === 'darwin') {
-        // Highest always-on-top level — sits above screen savers and full-screen apps
-        mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-        // Show on every macOS Space / virtual desktop
-        // mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        // Hide the traffic-light close/min/max buttons (redundant with frame:false but belt-and-suspenders)
-        // mainWindow.setWindowButtonVisibility(false);
-        // Disable Touch Bar entirely
         try {
-            mainWindow.setTouchBar(new TouchBar({ items: [] }));
-        } catch (e) {
+            // Create an empty TouchBar with no items to completely disable it
+            const emptyTouchBar = new TouchBar({ items: [] });
+            mainWindow.setTouchBar(emptyTouchBar);
+        } catch (error) {
+            console.error('Error setting Touch Bar:', error);
+            // Fallback to null if TouchBar creation fails
             mainWindow.setTouchBar(null);
         }
     }
 
+    // Windows-specific: Hide from taskbar and set additional properties
     if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true, 'screen-saver');
-        mainWindow.setSkipTaskbar(false); // Keep visible in taskbar with correct icon
-        // Explicitly apply the custom icon — overrides the default Electron icon
-        const winIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico'));
-        if (!winIcon.isEmpty()) {
-            mainWindow.setIcon(winIcon);
-        }
+        // Hide window from taskbar immediately
+        mainWindow.setSkipTaskbar(false);
     }
-
-    // Block all new window / popup creation (target="_blank", window.open, etc.)
-    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-    // Suppress right-click context menu
-    mainWindow.webContents.on('context-menu', (e) => e.preventDefault());
-
-    // Block file downloads
-    mainWindow.webContents.session.on('will-download', (e) => e.preventDefault());
-
-    // Prevent the renderer from navigating the main frame away from the local app
-    mainWindow.webContents.on('will-navigate', (e, url) => {
-        if (!url.startsWith('file://')) e.preventDefault();
-    });
 
     // Ensure window is shown (important for kiosk mode on Windows)
     mainWindow.once('ready-to-show', () => {
@@ -506,7 +475,7 @@ function createWindow() {
                             const screenBounds = primaryDisplay.bounds;
 
                             // If window doesn't cover full screen, resize it
-                            // if (currentBounds.width !== screenBounds.width ||
+                            // if (currentBounds.width !== screenBounds.width || 
                             //     currentBounds.height !== screenBounds.height ||
                             //     currentBounds.x !== screenBounds.x ||
                             //     currentBounds.y !== screenBounds.y) {
@@ -686,53 +655,8 @@ function createWindow() {
             }
         }
 
-        // Block Escape — exits kiosk on macOS if not caught
-        if (input.key === 'Escape') {
-            event.preventDefault();
-            return;
-        }
-
-        // Block F11 (toggle fullscreen), F1 (help), F3 (find), F4 (address bar alt)
-        if (['F1', 'F3', 'F4', 'F6', 'F11'].includes(input.key)) {
-            event.preventDefault();
-            return;
-        }
-
-        // Block print (Ctrl/Cmd+P)
-        if (input.key === 'p' && (input.control || input.meta)) {
-            event.preventDefault();
-            return;
-        }
-
-        // Block refresh (Ctrl/Cmd+R, F5)
-        if ((input.key === 'r' && (input.control || input.meta)) || input.key === 'F5') {
-            event.preventDefault();
-            return;
-        }
-
-        // Block close-tab / close-window shortcuts (Ctrl/Cmd+W)
-        if (input.key === 'w' && (input.control || input.meta)) {
-            event.preventDefault();
-            return;
-        }
-
-        // Block new window/tab (Ctrl/Cmd+N, Ctrl/Cmd+T)
-        if ((input.key === 'n' || input.key === 't') && (input.control || input.meta)) {
-            event.preventDefault();
-            return;
-        }
-
-        // Block find (Ctrl/Cmd+F, Ctrl/Cmd+G)
-        if ((input.key === 'f' || input.key === 'g') && (input.control || input.meta)) {
-            event.preventDefault();
-            return;
-        }
-
-        // Block zoom (Ctrl/Cmd + / -)
-        if ((input.key === '+' || input.key === '-' || input.key === '=') && (input.control || input.meta)) {
-            event.preventDefault();
-            return;
-        }
+        // Allow DevTools shortcuts (Ctrl+Shift+I, F12, or Cmd+Opt+I on macOS)
+        // Removed blocking to allow toggling DevTools
     });
 
     // Handle failed loads (including iframe errors)
@@ -1129,7 +1053,7 @@ app.whenReady().then(() => {
     console.log('🔍 Checking process.argv for deep link URL...');
     console.log('🔍 process.argv:', process.argv);
     console.log('🔍 process.platform:', process.platform);
-
+    
     if (process.platform === 'win32') {
         const url = process.argv.find((arg) => arg.startsWith('proctorx://'));
         if (url) {
@@ -1156,7 +1080,7 @@ app.whenReady().then(() => {
             }
         }
     }
-
+    
     // Setup display monitoring
     setupDisplayMonitoring();
 
