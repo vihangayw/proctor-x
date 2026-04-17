@@ -1654,8 +1654,8 @@ window.electronAPI.onLaunchData(async (data) => {
     console.info("🚀 onLaunchData received!");
     console.log('📊 Got launch data:', data);
 
-    const { quizId, studentId, tkn, sqid, examType } = data;
-    console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid, examType, examTypeType: typeof examType });
+    const { quizId, studentId, tkn, sqid, examType, pdf_mcq } = data;
+    console.log('📋 Extracted parameters:', { quizId, studentId, tkn: tkn?.substring(0, 20) + '...', sqid, examType, examTypeType: typeof examType, pdf_mcq });
     console.log('📋 Full data object:', JSON.stringify(data, null, 2));
 
     // Store exam data for audit logging
@@ -1674,8 +1674,12 @@ window.electronAPI.onLaunchData(async (data) => {
     // Use resit-preview if examType is 'resit', otherwise use exam-preview
     const normalizedExamType = examType ? String(examType).trim().toLowerCase() : 'exam';
     const previewPath = normalizedExamType === 'resit' ? 'resit-preview' : 'exam-preview';
-    const examUrl = `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}`;
-    console.log('🌐 Loading exam URL:', examUrl);
+    const normalizedPdfMcq = pdf_mcq ? String(pdf_mcq).trim().toLowerCase() : 'pdf';
+    // For MCQ mode, append '/mcq' so the LMS route /:pdf_mcq param is set; PDF keeps existing behaviour
+    const examUrl = normalizedPdfMcq === 'mcq'
+        ? `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/mcq`
+        : `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/pdf`;
+    console.log('🌐 Loading exam URL:', examUrl, '(mode:', normalizedPdfMcq, ')');
 
     // Set up error handling for iframe
     let loadTimeout;

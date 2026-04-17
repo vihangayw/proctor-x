@@ -45,16 +45,17 @@ function parseDeeplinkUrl(url) {
         const parts = parsed.pathname.split('/').filter(Boolean); // Remove empty strings
         console.log('🔍 URL parts:', parts, 'Length:', parts.length);
 
-        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType']
+        // Expected structure: ['hardcodedId', 'quizId', 'studentId', 'token', 'studentQuizId', 'examType', 'pdf_mcq']
         // The 'e-quiz' is part of the hostname, not pathname
         // examType is either 'resit' or 'exam'
+        // pdf_mcq is either 'pdf' or 'mcq' (optional, defaults to 'pdf')
         if (parts.length >= 6) {
-            const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType] = parts;
-            const data = { quizId, studentId, tkn, sqid: studentQuizId, examType };
+            const [hardcodedId, quizId, studentId, tkn, studentQuizId, examType, pdf_mcq] = parts;
+            const data = { quizId, studentId, tkn, sqid: studentQuizId, examType, pdf_mcq: pdf_mcq || 'pdf' };
             console.log('✅ Successfully parsed deep link data:', data);
             return data;
         } else {
-            console.error('❌ Invalid URL structure. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType');
+            console.error('❌ Invalid URL structure. Expected: proctorx://e-quiz/hardcodedId/quizId/studentId/token/sqid/examType/pdf_mcq');
             console.error('❌ Got', parts.length, 'parts, expected at least 6');
             return null;
         }
