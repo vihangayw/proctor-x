@@ -37,4 +37,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onBatteryStatusUpdate: (callback) => ipcRenderer.on('battery-status-update', (event, data) => callback(data)),
   onNetworkStatusUpdate: (callback) => ipcRenderer.on('network-status-update', (event, data) => callback(data)),
   onSendExitAuditLog: (callback) => ipcRenderer.on('send-exit-audit-log', (event) => callback()),
+  setExamMode: (active) => ipcRenderer.send('set-exam-mode', active),
 });

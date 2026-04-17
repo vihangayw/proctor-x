@@ -24,6 +24,30 @@ let mainWindow
 
 let deeplinkData = null;
 let multipleDisplayAlertShowing = false; // Track if multiple display alert is showing
+let isExamMode = false; // Track if user is on an exam page (disables exit shortcut)
+const examFrameIds = new Set(); // routing IDs of frames currently on an exam URL
+
+const EXAM_URL_PATTERNS = [
+    /56565f34-9e79-4f6e-972e-0aefbfcc111e/,
+    /\/(e-upload|r-upload)\//,
+];
+
+function checkIsExamUrl(url) {
+    return url ? EXAM_URL_PATTERNS.some((re) => re.test(url)) : false;
+}
+
+function updateExamFrame(frameRoutingId, url) {
+    if (checkIsExamUrl(url)) {
+        examFrameIds.add(frameRoutingId);
+    } else {
+        examFrameIds.delete(frameRoutingId);
+    }
+    const nowExam = examFrameIds.size > 0;
+    if (nowExam !== isExamMode) {
+        isExamMode = nowExam;
+        console.log(`Exam mode: ${isExamMode} (URL: ${url})`);
+    }
+}
 
 remoteMain.initialize();
 
@@ -127,19 +151,19 @@ function createWindow() {
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
-        kiosk: false, // True kiosk mode (even more restrictive than fullscreen)
-        alwaysOnTop: false, // Keep window on top of others
-        movable: true, // Prevent window movement
-        minimizable: true, // Disable minimize button
-        maximizable: true, // Disable maximize button
-        closable: true, // Enable close button
-        // titleBarStyle: 'hidden', // Alternative to frame: false on macOS
-        // autoHideMenuBar: true,// Alternative for menu visibility
-        width: 1000, // Default width (will be overridden by fullscreen)
-        height: 800, // Default height (will be overridden by fullscreen)
-        // fullscreen: true, // Enable fullscreen mode
-        // resizable: false, // Disable window resizing
-        // frame: false, // Remove window frame (including close/minimize buttons)
+        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
+        alwaysOnTop: true, // Keep window on top of others
+        movable: false, // Prevent window movement
+        minimizable: false, // Disable minimize button
+        maximizable: false, // Disable maximize button
+        closable: false, // Enable close button
+        titleBarStyle: 'hidden', // Alternative to frame: false on macOS
+        autoHideMenuBar: true,// Alternative for menu visibility
+        // width: 1000, // Default width (will be overridden by fullscreen)
+        // height: 800, // Default height (will be overridden by fullscreen)
+        fullscreen: true, // Enable fullscreen mode
+        resizable: false, // Disable window resizing
+        frame: false, // Remove window frame (including close/minimize buttons)
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -339,6 +363,20 @@ function createWindow() {
             console.log('No deeplink data available yet');
         }
     });
+    // Track exam URLs across main frame and all iframes
+    // did-navigate: full navigation (url, httpCode, httpText, isMainFrame, frameProcessId, frameRoutingId)
+    mainWindow.webContents.on('did-navigate', (_ev, url, _code, _text, _isMain, _pid, frameRoutingId) => {
+        updateExamFrame(frameRoutingId, url);
+    });
+    // did-navigate-in-page: React Router / hash changes (url, isMainFrame, frameProcessId, frameRoutingId)
+    mainWindow.webContents.on('did-navigate-in-page', (_ev, url, _isMain, _pid, frameRoutingId) => {
+        updateExamFrame(frameRoutingId, url);
+    });
+    // did-frame-navigate: any frame incl. iframes (url, httpCode, httpText, isMainFrame, frameProcessId, frameRoutingId)
+    mainWindow.webContents.on('did-frame-navigate', (_ev, url, _code, _text, _isMain, _pid, frameRoutingId) => {
+        updateExamFrame(frameRoutingId, url);
+    });
+
     // Optional: Make sure window stays fullscreen even if user tries to exit
     mainWindow.on('leave-full-screen', () => {
         //mainWindow.setFullScreen(false)
@@ -643,34 +681,20 @@ function createWindow() {
         else cb(false);
     });
 
-    // Handle window close with confirmation dialog
+    // Block close button — only Cmd/Ctrl+Shift+Q is allowed to exit
     mainWindow.on('close', (event) => {
-        event.preventDefault(); // Prevent default close behavior
-
-        // Show SweetAlert confirmation dialog
+        event.preventDefault();
         if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('show-sweetalert-confirm', {
-                title: 'Exit ProctorX',
-                text: 'Are you sure you want to exit application? This will close the application completely and you will need to restart it to continue.',
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: 'Yes, Exit',
-                cancelButtonText: 'Cancel',
+            mainWindow.webContents.send('show-sweetalert-dialog', {
+                title: 'Close Button Disabled',
+                text: process.platform === 'darwin'
+                    ? 'Use Cmd+Shift+Q to exit the application.'
+                    : 'Use Ctrl+Shift+Q to exit the application.',
+                icon: 'info',
+                confirmButtonText: 'OK',
                 allowOutsideClick: false,
                 allowEscapeKey: false
             });
-
-            // Listen for response
-            const handler = (event, confirmed) => {
-                ipcMain.removeListener('sweetalert-confirm-response', handler);
-                if (confirmed) {
-                    app.exit(0);
-                }
-                // If cancelled, do nothing (window stays open)
-            };
-            ipcMain.once('sweetalert-confirm-response', handler);
-        } else {
-            app.exit(0);
         }
     });
 
@@ -882,6 +906,12 @@ ipcMain.handle('get-network-status', async () => {
     // Network status is better handled in the renderer using navigator.onLine
     // This handler is kept for compatibility but renderer will use browser API
     return { online: true };
+});
+
+// Set/clear exam mode from renderer — disables Cmd/Ctrl+Shift+Q while active
+ipcMain.on('set-exam-mode', (_, active) => {
+    isExamMode = !!active;
+    console.log(`Exam mode: ${isExamMode}`);
 });
 
 // Handler for multiple display alert confirmation
@@ -1118,9 +1148,47 @@ app.whenReady().then(() => {
         // (moved to createWindow function to avoid accessing mainWindow before it exists)
     }
 
-    // Register global shortcut for exit
+    // Block Cmd+Q on macOS so it cannot be used to quit
+    if (process.platform === 'darwin') {
+        try {
+            globalShortcut.register('Command+Q', () => {
+                console.log('Cmd+Q blocked');
+            });
+        } catch (error) {
+            console.error('Error blocking Cmd+Q:', error);
+        }
+    }
+
+    // Block Alt+F4 on Windows
+    if (process.platform === 'win32') {
+        try {
+            globalShortcut.register('Alt+F4', () => {
+                console.log('Alt+F4 blocked');
+            });
+        } catch (error) {
+            console.error('Error blocking Alt+F4:', error);
+        }
+    }
+
+    // Register global shortcut for exit — only allowed method to quit
     try {
         globalShortcut.register('CommandOrControl+Shift+Q', () => {
+            // Block exit during examination
+            if (isExamMode) {
+                console.log('Exit blocked: exam mode active');
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('show-sweetalert-dialog', {
+                        title: 'Exit Disabled During Exam',
+                        text: 'You cannot exit the application while an examination is in progress.',
+                        icon: 'warning',
+                        confirmButtonText: 'OK',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false
+                    });
+                }
+                return;
+            }
+
             // Don't allow exit if multiple displays are detected
             const displays = screen.getAllDisplays();
             if (displays.length >= 2 && multipleDisplayAlertShowing) {
@@ -1141,14 +1209,11 @@ app.whenReady().then(() => {
                     allowEscapeKey: false
                 });
 
-                // Listen for response
                 const handler = (event, confirmed) => {
                     ipcMain.removeListener('sweetalert-confirm-response', handler);
                     if (confirmed) {
-                        // Send message to renderer to log exit audit before quitting
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('send-exit-audit-log');
-                            // Give a small delay for audit log to be sent
                             setTimeout(() => {
                                 app.exit(0);
                             }, 500);
@@ -1156,7 +1221,6 @@ app.whenReady().then(() => {
                             app.exit(0);
                         }
                     }
-                    // If cancelled, do nothing (window stays open)
                 };
                 ipcMain.once('sweetalert-confirm-response', handler);
             } else {
