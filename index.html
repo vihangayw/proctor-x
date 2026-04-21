@@ -241,6 +241,11 @@
         opacity: 0.88;
     }
 
+    .perm-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
     .perm-btn-primary {
         background: #024565;
         color: #fff;
@@ -357,7 +362,7 @@
             <strong>ProctorX</strong>, then click <strong>Retry</strong>.
         </div>
         <button class="perm-btn perm-btn-primary" onclick="retryPermissions()">Retry</button>
-        <button class="perm-btn perm-btn-secondary" onclick="openSettings('screen')">Open Privacy &amp; Security
+        <button id="btnOpenSettings" class="perm-btn perm-btn-secondary" disabled onclick="openSettings('screen')">Open Privacy &amp; Security
             Settings
         </button>
         <button class="perm-btn" style="background:#e0e4ea;color:#555;" onclick="window.electronAPI.forceQuitApp()">Quit
@@ -414,9 +419,11 @@
     async function checkPermissions() {
         const overlay = document.getElementById('permissionOverlay');
         const errBox = document.getElementById('permError');
+        const btnSettings = document.getElementById('btnOpenSettings');
 
         overlay.classList.add('visible');
         errBox.classList.remove('visible');
+        btnSettings.disabled = true;
 
         setPermStatus('camera', 'checking');
         setPermStatus('microphone', 'checking');
@@ -469,8 +476,10 @@
 
         if (cameraOk && micOk && screenOk) {
             overlay.classList.remove('visible');
+            btnSettings.disabled = true;
         } else {
             errBox.classList.add('visible');
+            btnSettings.disabled = false;
         }
     }
 

@@ -15,6 +15,13 @@ const path = require('path')
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
 
+// Must be set before app.whenReady() so Windows maps the running process to our
+// app identity (matching the NSIS shortcut's AppUserModelID) — without this,
+// Windows shows the default Electron icon in the taskbar and Start menu.
+if (process.platform === 'win32') {
+    app.setAppUserModelId('com.cps.proctorx');
+}
+
 // Enable screen capture in Electron
 app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
 app.commandLine.appendSwitch('allow-http-screen-capture')
@@ -197,9 +204,9 @@ function createWindow() {
     app.setAsDefaultProtocolClient('proctorx');
 
     // Open DevTools in development
-    // if (!app.isPackaged) {
+    if (!app.isPackaged) {
         mainWindow.webContents.openDevTools()
-    // }
+    }
     // mainWindow.setMenu(null) // Remove menu bar
 
     // Disable Touch Bar on macOS by creating an empty TouchBar
@@ -216,10 +223,13 @@ function createWindow() {
         }
     }
 
-    // Windows-specific: Hide from taskbar and set additional properties
+    // Windows: keep in taskbar and force our icon (belt-and-suspenders over BrowserWindow icon option)
     if (process.platform === 'win32') {
-        // Hide window from taskbar immediately
         mainWindow.setSkipTaskbar(false);
+        const winIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico'));
+        if (!winIcon.isEmpty()) {
+            mainWindow.setIcon(winIcon);
+        }
     }
 
     // Ensure window is shown (important for kiosk mode on Windows)
