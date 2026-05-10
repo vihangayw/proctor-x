@@ -15,11 +15,12 @@
   },
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --win",
+    "start": "electron --no-sandbox .",
+    "build": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac",
     "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:linux": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "dist:all": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --win --linux"
   },
   "build": {
@@ -138,8 +139,18 @@
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "maintainer": "vyasith@gmail.com",
       "icon": "assets/icon.png"

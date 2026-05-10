@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getScreenAccessStatus: () => ipcRenderer.invoke('get-screen-access-status'),
   getMediaAccessStatus: () => ipcRenderer.invoke('get-media-access-status'),
   requestScreenPermission: () => ipcRenderer.invoke('request-screen-permission'),
+    applyExamKioskMode: () => ipcRenderer.invoke('apply-exam-kiosk-mode'),
+    linuxApplyExamKioskMode: () => ipcRenderer.invoke('linux-apply-exam-kiosk-mode'),
+    linuxExitExamKioskMode: () => ipcRenderer.invoke('linux-exit-exam-kiosk-mode'),
   openScreenCaptureSettings: () => ipcRenderer.invoke('open-screen-capture-settings'),
   openPrivacySettings: (type) => ipcRenderer.invoke('open-privacy-settings', type),
     // Add method to get display media stream from Electron

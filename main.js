@@ -28,11 +28,17 @@ app.commandLine.appendSwitch('allow-http-screen-capture')
 app.commandLine.appendSwitch('disable-site-isolation-trials')
 
 let mainWindow
+/** Linux-only: screen capture is tied to this BrowserWindow; never use a helper window PipeWire closes. */
+let linuxExamKioskApplied = false;
 
 let deeplinkData = null;
 let multipleDisplayAlertShowing = false; // Track if multiple display alert is showing
 let isExamMode = false; // Track if user is on an exam page (disables exit shortcut)
 const examFrameIds = new Set(); // routing IDs of frames currently on an exam URL
+
+function shouldEnforceLinuxKioskGuards() {
+    return process.platform !== 'linux' || linuxExamKioskApplied;
+}
 
 const EXAM_URL_PATTERNS = [
     /56565f34-9e79-4f6e-972e-0aefbfcc111e/,
@@ -58,11 +64,10 @@ function updateExamFrame(frameRoutingId, url) {
 
 remoteMain.initialize();
 
-// Windows-specific: Request single instance lock to handle deep links when app is already running
-if (process.platform === 'win32') {
+// Enforce single instance on Windows and Linux
+if (process.platform === 'win32' || process.platform === 'linux') {
     const gotTheLock = app.requestSingleInstanceLock();
     if (!gotTheLock) {
-        // Another instance is already running, exit this one
         app.exit(0);
     }
 }
@@ -157,20 +162,24 @@ function createWindow() {
         );
         app.dock.setIcon(icon);
     }
+    const primaryBounds = screen.getPrimaryDisplay().bounds;
+    const isKioskPlatform = process.platform === 'darwin' || process.platform === 'win32';
     mainWindow = new BrowserWindow({
-        kiosk: true, // True kiosk mode (even more restrictive than fullscreen)
-        alwaysOnTop: true, // Keep window on top of others
-        movable: false, // Prevent window movement
-        minimizable: false, // Disable minimize button
-        maximizable: false, // Disable maximize button
-        closable: false, // Enable close button
-        titleBarStyle: 'hidden', // Alternative to frame: false on macOS
-        autoHideMenuBar: true,// Alternative for menu visibility
-        // width: 1000, // Default width (will be overridden by fullscreen)
-        // height: 800, // Default height (will be overridden by fullscreen)
-        fullscreen: true, // Enable fullscreen mode
-        resizable: false, // Disable window resizing
-        frame: false, // Remove window frame (including close/minimize buttons)
+        x: primaryBounds.x,
+        y: primaryBounds.y,
+        width: primaryBounds.width,
+        height: primaryBounds.height,
+        kiosk: isKioskPlatform,
+        alwaysOnTop: false, // Keep window on top of others
+        movable: !isKioskPlatform,
+        minimizable: !isKioskPlatform,
+        maximizable: !isKioskPlatform,
+        closable: true, // Close button still shows but is intercepted below
+        titleBarStyle: 'hidden',
+        autoHideMenuBar: true,
+        fullscreen: isKioskPlatform,
+        resizable: !isKioskPlatform,
+        frame: process.platform === 'linux', // Remove window frame on mac/win
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -260,65 +269,30 @@ function createWindow() {
         if (mainWindow && !mainWindow.isDestroyed()) {
             // Windows-specific: Ensure fullscreen and hide taskbar BEFORE showing
             if (process.platform === 'win32') {
-                // Set fullscreen and hide taskbar before showing window
                 mainWindow.setSkipTaskbar(false);
-                //mainWindow.setFullScreen(false);
-                //mainWindow.setAlwaysOnTop(true);
+                mainWindow.setFullScreen(true);
+                mainWindow.setAlwaysOnTop(true, 'screen-saver');
             }
 
             mainWindow.show();
             mainWindow.focus();
 
-            // Additional Windows-specific setup after window is shown
-            // Use multiple attempts to ensure taskbar is hidden and window is on top
+            // Additional Windows-specific setup after window is shown — multiple
+            // attempts because Windows compositor can reset these on first paint.
             if (process.platform === 'win32') {
-                // Immediate setup - right after show()
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.setSkipTaskbar(false);
-                    //mainWindow.setFullScreen(false);
-                    //mainWindow.setAlwaysOnTop(true);
-                    mainWindow.focus();
-                }
-
-                // First attempt after a brief delay
-                setTimeout(() => {
+                const enforceWin = () => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setFullScreen(true);
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                         mainWindow.focus();
                     }
-                }, 50);
-
-                // Second attempt to ensure it sticks
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
-                        mainWindow.focus();
-                    }
-                }, 200);
-
-                // Third attempt for stubborn cases
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
-                        mainWindow.focus();
-                    }
-                }, 500);
-
-                // Fourth attempt for very stubborn cases
-                setTimeout(() => {
-                    if (mainWindow && !mainWindow.isDestroyed()) {
-                        mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
-                        mainWindow.focus();
-                    }
-                }, 1000);
+                };
+                enforceWin();
+                setTimeout(enforceWin, 50);
+                setTimeout(enforceWin, 200);
+                setTimeout(enforceWin, 500);
+                setTimeout(enforceWin, 1000);
             }
         }
     });
@@ -387,13 +361,47 @@ function createWindow() {
         updateExamFrame(frameRoutingId, url);
     });
 
-    // Optional: Make sure window stays fullscreen even if user tries to exit
+    // Re-enter fullscreen/kiosk if the user somehow exits (mac/win only)
     mainWindow.on('leave-full-screen', () => {
-        //mainWindow.setFullScreen(false)
-    })
+        if (process.platform === 'darwin' || process.platform === 'win32') {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.setFullScreen(true);
+            }
+        }
+    });
+    // macOS: warn + refocus when the app loses focus
+    if (process.platform === 'darwin') {
+        mainWindow._dialogShowing = false;
+        mainWindow.on('blur', () => {
+            const now = Date.now();
+            if (!mainWindow._dialogShowing && (now - (mainWindow._lastDialogTime || 0)) > 2000) {
+                mainWindow._dialogShowing = true;
+                mainWindow._lastDialogTime = now;
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('show-sweetalert-warning', {
+                        title: 'Unauthorized Action Detected',
+                        text: 'You are not allowed to switch applications during the exam. Please remain focused on the exam application.',
+                        icon: 'warning',
+                        confirmButtonText: 'OK',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false
+                    });
+                }
+                setTimeout(() => {
+                    mainWindow._dialogShowing = false;
+                }, 5000);
+            }
+            // Refocus after a short delay (allows the warning dialog to render)
+            setTimeout(() => {
+                if (mainWindow && !mainWindow.isDestroyed() && !mainWindow._dialogShowing) {
+                    mainWindow.focus();
+                }
+            }, 300);
+        });
+    }
 
-    // Windows-specific: Keep window focused and on top
-    if (process.platform === 'win32') {
+    // Keep window focused and on top (Windows + Linux)
+    if (process.platform === 'win32' || process.platform === 'linux') {
         let focusInterval = null;
         // Store dialogShowing flag on mainWindow so it's accessible from all scopes
         mainWindow._dialogShowing = false;
@@ -403,6 +411,9 @@ function createWindow() {
         mainWindow.once('ready-to-show', () => {
             // Monitor window focus and keep it on top
             mainWindow.on('blur', () => {
+                if (!shouldEnforceLinuxKioskGuards()) {
+                    return;
+                }
                 const now = Date.now();
                 lastBlurTime = now;
 
@@ -439,6 +450,9 @@ function createWindow() {
 
             // Prevent window from being minimized
             mainWindow.on('minimize', (event) => {
+                if (!shouldEnforceLinuxKioskGuards()) {
+                    return;
+                }
                 event.preventDefault();
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     try {
@@ -450,14 +464,12 @@ function createWindow() {
                 }
             });
 
-            // Keep window always on top and hide taskbar (start immediately to ensure proper initial state)
-            // Start checking right away, but also set up immediately
+            // Keep window always on top — immediate enforcement for Windows
             if (process.platform === 'win32') {
-                // Immediate check and setup
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.setSkipTaskbar(false);
-                    //mainWindow.setFullScreen(false);
-                    //mainWindow.setAlwaysOnTop(true);
+                    mainWindow.setFullScreen(true);
+                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
                     mainWindow.focus();
                 }
             }
@@ -466,43 +478,32 @@ function createWindow() {
                 focusInterval = setInterval(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         try {
-                            // Hide from taskbar continuously
-                            mainWindow.setSkipTaskbar(false);
-
+                            if (!shouldEnforceLinuxKioskGuards()) {
+                                return;
+                            }
+                            if (process.platform === 'win32') {
+                                mainWindow.setSkipTaskbar(false);
+                                if (!mainWindow.isAlwaysOnTop()) {
+                                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+                                }
+                                if (!mainWindow.isFullScreen()) {
+                                    mainWindow.setFullScreen(true);
+                                }
+                            }
                             if (!mainWindow.isFocused()) {
                                 mainWindow.focus();
                             }
-                            if (!mainWindow.isAlwaysOnTop()) {
-                                //mainWindow.setAlwaysOnTop(true);
-                            }
-                            if (!mainWindow.isFullScreen()) {
-                                //mainWindow.setFullScreen(false);
-                            }
-
-                            // Ensure window covers entire screen including taskbar area
-                            const primaryDisplay = screen.getPrimaryDisplay();
-                            const currentBounds = mainWindow.getBounds();
-                            const screenBounds = primaryDisplay.bounds;
-
-                            // If window doesn't cover full screen, resize it
-                            // if (currentBounds.width !== screenBounds.width || 
-                            //     currentBounds.height !== screenBounds.height ||
-                            //     currentBounds.x !== screenBounds.x ||
-                            //     currentBounds.y !== screenBounds.y) {
-                            //     mainWindow.setBounds(screenBounds);
-                            // }
                         } catch (error) {
                             console.error('Error maintaining window state:', error);
                         }
                     } else {
-                        // Clean up interval if window is destroyed
                         if (focusInterval) {
                             clearInterval(focusInterval);
                             focusInterval = null;
                         }
                     }
-                }, 500); // Check every 500ms (more aggressive to prevent taskbar access)
-            }, 100); // Start checking after 100ms (reduced from 1000ms for faster initial setup)
+                }, 500);
+            }, 100);
         });
 
         // Additional aggressive blocking: Monitor for Windows key presses at lower level
@@ -513,6 +514,9 @@ function createWindow() {
                 const aggressiveFocusInterval = setInterval(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         try {
+                            if (!shouldEnforceLinuxKioskGuards()) {
+                                return;
+                            }
                             // Continuously ensure window is on top and taskbar is hidden
                             if (process.platform === 'win32') {
                                 mainWindow.setSkipTaskbar(false);
@@ -548,10 +552,9 @@ function createWindow() {
                                     // If dialog was shown recently, just refocus without showing another dialog
                                     mainWindow.focus();
                                     if (process.platform === 'win32') {
-                                        //mainWindow.setAlwaysOnTop(true);
-                                        // Force fullscreen to close any overlays
+                                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                                         if (!mainWindow.isFullScreen()) {
-                                            //mainWindow.setFullScreen(false);
+                                            mainWindow.setFullScreen(true);
                                         }
                                     }
                                 }
@@ -559,21 +562,12 @@ function createWindow() {
 
                             // Ensure window covers full screen and taskbar is hidden
                             if (process.platform === 'win32') {
-                                const primaryDisplay = screen.getPrimaryDisplay();
-                                const currentBounds = mainWindow.getBounds();
-                                const screenBounds = primaryDisplay.bounds;
-
-                                // Always ensure taskbar is hidden
                                 mainWindow.setSkipTaskbar(false);
-
-                                // Ensure fullscreen is maintained
                                 if (!mainWindow.isFullScreen()) {
-                                    //mainWindow.setFullScreen(false);
+                                    mainWindow.setFullScreen(true);
                                 }
-
-                                // Ensure always on top is maintained
                                 if (!mainWindow.isAlwaysOnTop()) {
-                                    //mainWindow.setAlwaysOnTop(true);
+                                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
                                 }
                             }
                         } catch (error) {
@@ -602,15 +596,18 @@ function createWindow() {
         });
     }
     mainWindow.webContents.on('before-input-event', (event, input) => {
+        if (!shouldEnforceLinuxKioskGuards()) {
+            return;
+        }
         // Block Tab key
         if (input.key === 'Tab') {
             event.preventDefault();
             return;
         }
 
-        // Windows-specific: Block Alt+Tab and other escape mechanisms
-        if (process.platform === 'win32') {
-            // Block Alt+Tab (Alt key + Tab key)
+        // Windows + Linux: Block Alt+Tab and other escape mechanisms
+        if (process.platform === 'win32' || process.platform === 'linux') {
+            // Block Alt+Tab
             if (input.key === 'Tab' && input.alt) {
                 event.preventDefault();
                 return;
@@ -622,44 +619,68 @@ function createWindow() {
                 return;
             }
 
-            // Block Windows key combinations
+            // Block Super/Meta key (Windows key / Super key)
             if (input.key === 'Meta' || input.key === 'Super') {
                 event.preventDefault();
                 return;
             }
 
-            // Block Ctrl+Esc (opens Start menu)
+            // Block Ctrl+Esc (opens Start/Activities menu)
             if (input.key === 'Escape' && input.control) {
                 event.preventDefault();
                 return;
             }
 
-            // Block Win+D (show desktop)
+            // Block Super+D (show desktop)
             if (input.key === 'd' && input.meta) {
                 event.preventDefault();
                 return;
             }
 
-            // Block Win+R (run dialog)
+            // Block Super+R (run dialog / GNOME runner)
             if (input.key === 'r' && input.meta) {
                 event.preventDefault();
                 return;
             }
 
-            // Block Win+E (file explorer)
+            // Block Super+E (file manager)
             if (input.key === 'e' && input.meta) {
                 event.preventDefault();
                 return;
             }
 
-            // Block Win+L (lock screen)
+            // Block Super+L (lock screen)
             if (input.key === 'l' && input.meta) {
                 event.preventDefault();
                 return;
             }
 
-            // Block Win+M (minimize all)
+            // Block Super+M (minimize all / notifications)
             if (input.key === 'm' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+
+            // Block Super+Tab (GNOME window switcher)
+            if (input.key === 'Tab' && input.meta) {
+                event.preventDefault();
+                return;
+            }
+        }
+
+        // macOS: block common escape shortcuts
+        if (process.platform === 'darwin') {
+            // Cmd+H (hide), Cmd+M (minimize), Cmd+Tab (app switch), Cmd+` (window switch)
+            if (input.meta && (input.key === 'h' || input.key === 'm' || input.key === 'Tab' || input.key === '`')) {
+                event.preventDefault();
+                return;
+            }
+            // Cmd+Space (Spotlight), Cmd+Opt+Esc (Force Quit)
+            if (input.meta && input.key === ' ') {
+                event.preventDefault();
+                return;
+            }
+            if (input.meta && input.alt && input.key === 'Escape') {
                 event.preventDefault();
                 return;
             }
@@ -691,6 +712,20 @@ function createWindow() {
         else cb(false);
     });
 
+    // On Linux (kiosk mode), OS-level screen-share picker can appear behind the app.
+    // Register on Session to auto-select primary screen and bypass the picker.
+    mainWindow.webContents.session.setDisplayMediaRequestHandler(
+        async (request, callback) => {
+            try {
+                const sources = await desktopCapturer.getSources({types: ['screen']});
+                callback({video: sources[0], audio: 'loopback'});
+            } catch {
+                callback({});
+            }
+        },
+        {useSystemPicker: false}
+    );
+
     // Block close button — only Cmd/Ctrl+Shift+Q is allowed to exit
     mainWindow.on('close', (event) => {
         event.preventDefault();
@@ -710,6 +745,70 @@ function createWindow() {
 
 }
 
+/** Elevate this same window to kiosk/fullscreen after permission checks pass.
+ * On Linux, aggressive focus/minimize guards (see ready-to-show handlers) steal focus from
+ * xdg-desktop-portal while the renderer starts a second capture after the permission overlay.
+ * @param {{ skipLinuxKioskGuards?: boolean }} [opts]
+ */
+function applyExamKioskModeInternal(opts = {}) {
+    const skipLinuxGuards = process.platform === 'linux' && !!opts.skipLinuxKioskGuards;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        return {ok: false, reason: 'no-window'};
+    }
+    if (linuxExamKioskApplied) {
+        return {ok: true, already: true};
+    }
+    let activatedLinuxGuards = false;
+    if (!skipLinuxGuards) {
+        linuxExamKioskApplied = true;
+        activatedLinuxGuards = true;
+    }
+    try {
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const targetBounds = primaryDisplay?.bounds;
+        const safeSet = (fnName, ...args) => {
+            try {
+                if (typeof mainWindow[fnName] === 'function') {
+                    mainWindow[fnName](...args);
+                }
+            } catch (err) {
+                console.warn(`Window method failed: ${fnName}`, err?.message || err);
+            }
+        };
+        if (typeof mainWindow.setMenuBarVisibility === 'function') {
+            safeSet('setMenuBarVisibility', false);
+        }
+        // Apply fullscreen/kiosk stack dynamically — Linux only.
+        // macOS and Windows have their own window behaviour and were working before;
+        // applying kiosk here would break their window chrome.
+        if (process.platform === 'linux') {
+            if (targetBounds) {
+                safeSet('setBounds', targetBounds);
+            }
+            safeSet('setFullScreen', true);
+            safeSet('setKiosk', true);
+            safeSet('setMovable', false);
+            safeSet('setMinimizable', false);
+            safeSet('setResizable', false);
+            safeSet('focus');
+        }
+        return {
+            ok: true,
+            state: {
+                kiosk: mainWindow.isKiosk(),
+                fullScreen: mainWindow.isFullScreen(),
+                alwaysOnTop: mainWindow.isAlwaysOnTop(),
+            },
+        };
+    } catch (e) {
+        console.error('Exam kiosk elevation failed:', e);
+        if (activatedLinuxGuards) {
+            linuxExamKioskApplied = false;
+        }
+        return {ok: false, reason: String(e.message || e)};
+    }
+}
+
 // macOS-specific: Handle open-url event
 app.on('open-url', (event, url) => {
     event.preventDefault();
@@ -726,24 +825,45 @@ app.setAsDefaultProtocolClient('proctorx');
 app.on('web-contents-created', (_, contents) => {
     // Block Tab key and Windows-specific shortcuts on all windows
     contents.on('before-input-event', (event, input) => {
+        if (!shouldEnforceLinuxKioskGuards()) {
+            return;
+        }
         if (input.key === 'Tab') {
             event.preventDefault();
         }
 
-        // Windows-specific: Block escape mechanisms
-        if (process.platform === 'win32') {
+        // Windows + Linux: Block escape mechanisms
+        if (process.platform === 'win32' || process.platform === 'linux') {
             // Block Alt+Tab
             if (input.key === 'Tab' && input.alt) {
                 event.preventDefault();
             }
 
-            // Block Windows key
+            // Block Super/Meta key
             if (input.key === 'Meta' || input.key === 'Super') {
+                event.preventDefault();
+            }
+
+            // Block Super+Tab (GNOME window switcher)
+            if (input.key === 'Tab' && input.meta) {
                 event.preventDefault();
             }
 
             // Block Ctrl+Esc
             if (input.key === 'Escape' && input.control) {
+                event.preventDefault();
+            }
+        }
+
+        // macOS: block common escape shortcuts
+        if (process.platform === 'darwin') {
+            if (input.meta && (input.key === 'h' || input.key === 'm' || input.key === 'Tab' || input.key === '`')) {
+                event.preventDefault();
+            }
+            if (input.meta && input.key === ' ') {
+                event.preventDefault();
+            }
+            if (input.meta && input.alt && input.key === 'Escape') {
                 event.preventDefault();
             }
         }
@@ -766,8 +886,9 @@ app.on('web-contents-created', (_, contents) => {
 app.setAsDefaultProtocolClient('proctorx');
 
 app.on('activate', () => {
-    // Don't create new windows on activate - let the app stay closed
-    // if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+    }
 });
 
 // Handle second-instance (for Windows - when app is already running)
@@ -790,7 +911,7 @@ ipcMain.handle('get-app-version', async () => {
 
 // Handle getting screen sources
 ipcMain.handle('get-sources', async () => {
-    return await desktopCapturer.getSources({ types: ['window', 'screen'] })
+    return await desktopCapturer.getSources({types: ['screen']})
 })
 
 ipcMain.handle('get-screen-access-status', async () => {
@@ -828,6 +949,29 @@ ipcMain.handle('request-screen-permission', async () => {
         return false;
     }
 })
+
+ipcMain.handle('apply-exam-kiosk-mode', async () =>
+    applyExamKioskModeInternal({skipLinuxKioskGuards: process.platform === 'linux'})
+);
+ipcMain.handle('linux-apply-exam-kiosk-mode', async () =>
+    applyExamKioskModeInternal({skipLinuxKioskGuards: false})
+);
+
+// Linux: temporarily exit kiosk so a re-share portal dialog is not hidden behind the fullscreen window
+ipcMain.handle('linux-exit-exam-kiosk-mode', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return {ok: false};
+    try {
+        linuxExamKioskApplied = false;
+        mainWindow.setKiosk(false);
+        mainWindow.setFullScreen(false);
+        mainWindow.setMovable(true);
+        mainWindow.setMinimizable(true);
+        mainWindow.setResizable(true);
+        return {ok: true};
+    } catch (e) {
+        return {ok: false, reason: String(e)};
+    }
+});
 
 ipcMain.handle('open-screen-capture-settings', async () => {
     if (process.platform !== 'darwin') {
@@ -1094,8 +1238,8 @@ app.whenReady().then(() => {
     // Setup display monitoring
     setupDisplayMonitoring();
 
-    // Windows-specific: Register global shortcuts to block Windows key combinations
-    // Do this after window creation to avoid blocking startup
+    // Register global shortcuts to block key combinations.
+    // Linux intentionally avoids these until sharing is enabled.
     if (process.platform === 'win32') {
         // Helper function to safely register shortcuts
         const registerShortcut = (accelerator, description) => {
@@ -1160,12 +1304,27 @@ app.whenReady().then(() => {
 
     // Block Cmd+Q on macOS so it cannot be used to quit
     if (process.platform === 'darwin') {
-        try {
-            globalShortcut.register('Command+Q', () => {
-                console.log('Cmd+Q blocked');
-            });
-        } catch (error) {
-            console.error('Error blocking Cmd+Q:', error);
+        const macShortcuts = [
+            ['Command+Q', 'Cmd+Q'],
+            ['Command+H', 'Cmd+H (hide)'],
+            ['Command+M', 'Cmd+M (minimize)'],
+            ['Command+Tab', 'Cmd+Tab (app switcher)'],
+            ['Command+`', 'Cmd+` (window switcher)'],
+            ['Command+Space', 'Cmd+Space (Spotlight)'],
+            ['Command+Option+Escape', 'Cmd+Opt+Esc (Force Quit)'],
+            ['Control+Up', 'Mission Control'],
+            ['Control+Down', 'App Expose'],
+            ['Control+Left', 'Space left'],
+            ['Control+Right', 'Space right'],
+        ];
+        for (const [accelerator, desc] of macShortcuts) {
+            try {
+                globalShortcut.register(accelerator, () => {
+                    console.log(`${desc} blocked`);
+                });
+            } catch (error) {
+                console.warn(`Could not block ${desc}:`, error.message);
+            }
         }
     }
 

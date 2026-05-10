@@ -403,9 +403,17 @@
 
 <!-- Permission check logic (runs before renderer module) -->
 <script>
+    // Renderer can wait on this to avoid starting a second capture request during permission checks.
+    window.__proctorPermissionsGranted = false;
+
     function setPermStatus(id, status) {
         const el = document.getElementById('perm-' + id + '-status');
         if (!el) return;
+        if (status === 'deferred') {
+            el.className = 'perm-status granted';
+            el.textContent = 'At exam start';
+            return;
+        }
         el.className = 'perm-status ' + (status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'checking');
         el.textContent = status === 'granted' ? 'Granted ✓' : status === 'denied' ? 'Denied ✗' : 'Checking…';
     }
@@ -420,7 +428,6 @@
         const overlay = document.getElementById('permissionOverlay');
         const errBox = document.getElementById('permError');
         const btnSettings = document.getElementById('btnOpenSettings');
-
         overlay.classList.add('visible');
         errBox.classList.remove('visible');
         btnSettings.disabled = true;
@@ -428,6 +435,12 @@
         setPermStatus('camera', 'checking');
         setPermStatus('microphone', 'checking');
         setPermStatus('screen', 'checking');
+
+        let platform = '';
+        try {
+            platform = window.electronAPI.getPlatform?.() || '';
+        } catch {
+        }
 
         // Step 1: request camera + mic via getUserMedia (triggers OS dialog on first run)
         let cameraOk = false, micOk = false;
@@ -452,32 +465,51 @@
             }
         }
 
-        // Step 2: trigger screen recording TCC prompt via main process
+        // Step 2: trigger screen recording prompt (macOS/Windows). Linux: one portal during renderer
+        // openScreenShare only — skip getSources here to avoid double PipeWire/xdg-desktop-portal prompts.
         let screenOk = false;
-        try {
-            screenOk = await window.electronAPI.requestScreenPermission();
-        } catch {
+        if (platform === 'linux') {
+            screenOk = true;
+        } else {
+            try {
+                screenOk = await window.electronAPI.requestScreenPermission();
+            } catch {
+            }
         }
 
-        // Step 3: read authoritative macOS TCC status (overrides getUserMedia result on macOS)
+        // Step 3: read authoritative macOS TCC status (overrides getUserMedia result on macOS).
+        // On Linux, getMediaAccessStatus always reports screen "granted"; Step 2 already set screenOk.
         if (window.electronAPI && window.electronAPI.getMediaAccessStatus) {
             try {
                 const s = await window.electronAPI.getMediaAccessStatus();
                 cameraOk = s.camera === 'granted';
                 micOk = s.microphone === 'granted';
-                screenOk = s.screen === 'granted';
+                if (platform !== 'linux') {
+                    screenOk = s.screen === 'granted';
+                }
             } catch {
             }
         }
 
         setPermStatus('camera', cameraOk ? 'granted' : 'denied');
         setPermStatus('microphone', micOk ? 'granted' : 'denied');
-        setPermStatus('screen', screenOk ? 'granted' : 'denied');
+        setPermStatus('screen', platform === 'linux' ? 'deferred' : (screenOk ? 'granted' : 'denied'));
 
         if (cameraOk && micOk && screenOk) {
+            window.__proctorPermissionsGranted = true;
+            window.dispatchEvent(new Event('proctor-permissions-granted'));
             overlay.classList.remove('visible');
             btnSettings.disabled = true;
+            if (window.electronAPI && window.electronAPI.applyExamKioskMode) {
+                try {
+                    const res = await window.electronAPI.applyExamKioskMode();
+                    console.log('Applied kiosk mode after permission check:', res);
+                } catch (e) {
+                    console.warn('applyExamKioskMode failed:', e);
+                }
+            }
         } else {
+            window.__proctorPermissionsGranted = false;
             errBox.classList.add('visible');
             btnSettings.disabled = false;
         }

@@ -116,9 +116,30 @@ const sendAuditLog = async (description) => {
     }
 };
 
+const waitForPermissionGate = async (timeoutMs = 30000) => {
+    if (window.__proctorPermissionsGranted) return true;
+    return await new Promise((resolve) => {
+        let settled = false;
+        const done = (ok) => {
+            if (settled) return;
+            settled = true;
+            window.removeEventListener('proctor-permissions-granted', onGranted);
+            resolve(ok);
+        };
+        const onGranted = () => done(true);
+        window.addEventListener('proctor-permissions-granted', onGranted, {once: true});
+        setTimeout(() => done(!!window.__proctorPermissionsGranted), timeoutMs);
+    });
+};
+
 const openScreenShare = async (quizId, examInfo, sqid) => {
     console.info('openScreenShare')
     try {
+        const permissionReady = await waitForPermissionGate();
+        if (!permissionReady) {
+            console.warn('Screen share blocked: permission check not completed yet.');
+            return;
+        }
         const sources = await window.electronAPI.getSources();
         const platform = await window.electronAPI.getPlatform();
 
@@ -159,6 +180,22 @@ const openScreenShare = async (quizId, examInfo, sqid) => {
         });
         console.log('✅ Screen stream obtained using Electron desktop capturer');
 
+        // Linux: PipeWire/portal capture is bound to this BrowserWindow — promote to kiosk AFTER stream exists
+        // so we never close a separate "precheck" window (that revokes the capture session).
+        if (platform === 'linux' && window.electronAPI?.linuxApplyExamKioskMode) {
+            try {
+                let res = await window.electronAPI.linuxApplyExamKioskMode();
+                // Some Linux window managers apply fullscreen/kiosk asynchronously; retry once.
+                if (!res?.ok || !res?.state?.kiosk || !res?.state?.fullScreen) {
+                    await new Promise((r) => setTimeout(r, 350));
+                    res = await window.electronAPI.linuxApplyExamKioskMode();
+                }
+                console.log('Linux kiosk promotion after screen share:', res);
+            } catch (e) {
+                console.warn('linuxApplyExamKioskMode failed:', e);
+            }
+        }
+
         // 🟢 Detect when screen sharing stops
         stream.getVideoTracks()[0].addEventListener('ended', async () => {
             console.log('Screen sharing stopped by the user or system');
@@ -171,11 +208,19 @@ const openScreenShare = async (quizId, examInfo, sqid) => {
                 uploadInterval = null;
             }
 
-            // Disconnect from LiveKit
-            // await disconnectFromLiveKit();
+            // On Linux, temporarily drop fullscreen/kiosk so the portal picker
+            // (if it appears for re-share) isn't hidden behind the window.
+            if (platform === 'linux' && window.electronAPI?.linuxExitExamKioskMode) {
+                try {
+                    await window.electronAPI.linuxExitExamKioskMode();
+                    // Give the WM time to actually exit fullscreen before the next getSources call
+                    await new Promise((r) => setTimeout(r, 600));
+                } catch (e) {
+                    console.warn('linuxExitExamKioskMode failed on re-share:', e);
+                }
+            }
 
-            // Optionally, notify backend or clean up resources
-            // 🔁 Restart screen sharing
+            // 🔁 Restart screen sharing (will re-apply kiosk after stream obtained)
             openScreenShare(quizId, examInfo, sqid);
         });
 
@@ -218,6 +263,7 @@ const openScreenShare = async (quizId, examInfo, sqid) => {
             uploadInterval = setInterval(() => {
                 uploadScreenCapture(sqid);
             }, 10000);
+            uploadScreenCapture(sqid);
         } else {
             console.log('⏭️ Skipping screen capture upload (shareScreen is disabled)');
             // Clear any existing interval if shareScreen is disabled
@@ -1844,7 +1890,18 @@ const getStudentInfo = async (spid, tkn, quizId, examInfo, sqid) => {
         localStorage.setItem('user_details', JSON.stringify(userData));
         localStorage.setItem('ws_token', userData.wsToken);
 
-        openScreenShare(quizId, examInfo, sqid);
+        await openScreenShare(quizId, examInfo, sqid);
+        // Linux: kiosk guards are deferred until after capture; if capture failed or was skipped, arm them here.
+        if (window.electronAPI?.getPlatform?.() === 'linux' && window.electronAPI?.linuxApplyExamKioskMode) {
+            const track = stream?.getVideoTracks?.()?.[0];
+            if (!track || track.readyState !== 'live') {
+                try {
+                    await window.electronAPI.linuxApplyExamKioskMode();
+                } catch (e) {
+                    console.warn('linuxApplyExamKioskMode (fallback after share) failed:', e);
+                }
+            }
+        }
     } catch (error) {
         console.error('Error calling login API:', error);
     }
@@ -1887,13 +1944,101 @@ const getExamInfo = async (qid, tkn, examType = 'exam') => {
     }
 }
 
-function dataURLtoBlob(dataurl) {
-    var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
-        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-    while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
+function getRendererPlatform() {
+    try {
+        return window.electronAPI?.getPlatform?.() || '';
+    } catch {
+        return '';
     }
-    return new Blob([u8arr], { type: mime });
+}
+
+async function canvasToScreenshotBlob(canvas) {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob(
+            (webpBlob) => {
+                if (webpBlob && webpBlob.size > 32) {
+                    resolve({blob: webpBlob, filename: 'frame.webp', mime: 'image/webp'});
+                    return;
+                }
+                canvas.toBlob(
+                    (pngBlob) => {
+                        if (pngBlob && pngBlob.size > 32) {
+                            resolve({blob: pngBlob, filename: 'frame.png', mime: 'image/png'});
+                        } else {
+                            reject(new Error('Screenshot blob empty'));
+                        }
+                    },
+                    'image/png'
+                );
+            },
+            'image/webp',
+            0.85
+        );
+    });
+}
+
+async function captureScreenFrameToCanvas(stream) {
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack || videoTrack.readyState !== 'live') {
+        throw new Error('No live screen video track');
+    }
+
+    if (typeof ImageCapture !== 'undefined') {
+        try {
+            const ic = new ImageCapture(videoTrack);
+            const bitmap = await ic.grabFrame();
+            try {
+                const canvas = document.createElement('canvas');
+                const scaleFactor = 1.55;
+                canvas.width = Math.max(1, Math.floor(bitmap.width * scaleFactor));
+                canvas.height = Math.max(1, Math.floor(bitmap.height * scaleFactor));
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                return canvas;
+            } finally {
+                bitmap.close?.();
+            }
+        } catch (e) {
+            console.warn('ImageCapture.grabFrame failed, falling back to video element:', e?.message || e);
+        }
+    }
+
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error('video error'));
+        video.play().catch(reject);
+    });
+    let vw = video.videoWidth;
+    let vh = video.videoHeight;
+    if (!vw || !vh) {
+        for (let i = 0; i < 40; i++) {
+            await new Promise((r) => requestAnimationFrame(r));
+            vw = video.videoWidth;
+            vh = video.videoHeight;
+            if (vw && vh) break;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+    }
+    if (!vw || !vh) {
+        video.srcObject = null;
+        video.remove();
+        throw new Error('Screen capture dimensions unavailable');
+    }
+
+    const canvas = document.createElement('canvas');
+    const scaleFactor = 1.55;
+    canvas.width = vw * scaleFactor;
+    canvas.height = vh * scaleFactor;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    video.srcObject = null;
+    video.remove();
+    return canvas;
 }
 
 const uploadScreenCapture = async (sqid) => {
@@ -1927,47 +2072,39 @@ const uploadScreenCapture = async (sqid) => {
 
     // console.log('🔗 Current iframe URL (checked):', currentUrl);
 
+    // Match exam flows: LMS loads exam-preview / resit-preview first; SPA may navigate to e-quiz / e-pdf / r-pdf.
+    // Relying only on legacy fixed UUID paths missed preview URLs and iframe.src-only reads (often on Linux/Wayland).
     const allowedPhrases = [
-        '/e-quiz/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
-        '/e-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
-         '/r-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
+        '/exam-preview/',
+        '/resit-preview/',
+        '/e-quiz/',
+        '/e-pdf/',
+        '/r-pdf/',
+        '/e-upload/',
+        '/r-upload/',
+        '/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
     ];
 
-    const shouldUpload = allowedPhrases.some(phrase => currentUrl.includes(phrase));
+    const platform = getRendererPlatform();
+    const isLinux = platform === 'linux';
+    let shouldUpload = allowedPhrases.some((phrase) => currentUrl.includes(phrase));
+    // Linux: iframe URL can be wrong (about:blank timing, portal) while exam is active — still upload if we have a session sqid.
+    if (isLinux && !shouldUpload && currentExamData?.sqid != null) {
+        shouldUpload = true;
+    }
     // console.log('❓ Should upload?', shouldUpload);
 
     if (!shouldUpload) {
-        console.log('⏭️ Skipping upload - URL does not match allowed phrases');
+        console.log('⏭️ Skipping upload - URL does not match allowed phrases', currentUrl);
         return;
     }
 
     try {
-        // console.log('🎥 Capturing frame from stream...');
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.muted = true;
-        video.srcObject = stream;
-        await video.play();
-
-        const canvas = document.createElement('canvas');
-        const scaleFactor = 1.55;
-        canvas.width = video.videoWidth * scaleFactor;
-        canvas.height = video.videoHeight * scaleFactor;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        const dataUrl = canvas.toDataURL('image/webp');
-        // console.log('🖼️ Frame captured, data URL length:', dataUrl.length);
-
-        const blob = dataURLtoBlob(dataUrl);
-        // console.log('📦 Blob created, size:', blob.size, 'type:', blob.type);
-
-        // Cleanup video
-        video.srcObject = null;
-        video.remove();
+        const canvas = await captureScreenFrameToCanvas(stream);
+        const {blob, filename} = await canvasToScreenshotBlob(canvas);
 
         let formData = new FormData();
-        formData.append("image", blob, "frame.webp");
+        formData.append("image", blob, filename);
         formData.append("sqid", sqid + '');
         formData.append("cam",   '0');
 
