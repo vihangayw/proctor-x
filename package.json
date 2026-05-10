@@ -20,6 +20,7 @@
     "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:win": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "dist:all": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --win --linux"
   },
   "build": {
@@ -113,7 +114,11 @@
         }
       ]
     },
-
+    "asarUnpack": [
+      "assets/icon.ico",
+      "assets/icon.icns",
+      "assets/icon.png"
+    ],
     "win": {
       "target": [
         {
@@ -124,8 +129,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "forceCodeSigning": false,
-      "signAndEditExecutable": false
+      "forceCodeSigning": false
     },
     "nsis": {
       "oneClick": false,

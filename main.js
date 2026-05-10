@@ -140,21 +140,27 @@ function sendLaunchDataToRenderer(data) {
 
 function createWindow() {
 
-    let iconPath;
-    const platform = process.platform;
+    // Resolve asset path: in a packaged app icon files are unpacked from asar so
+    // native Win32 APIs (LoadImage) can read them as real files.
+    function assetPath(relativePath) {
+        if (app.isPackaged) {
+            return path.join(process.resourcesPath, 'app.asar.unpacked', relativePath);
+        }
+        return path.join(__dirname, relativePath);
+    }
 
+    const platform = process.platform;
+    let iconPath;
     if (platform === 'win32') {
-        iconPath = path.join(__dirname, 'assets', 'icon.ico');
+        iconPath = assetPath('assets/icon.ico');
     } else if (platform === 'darwin') {
-        iconPath = path.join(__dirname, 'assets', 'icon.icns');
+        iconPath = assetPath('assets/icon.icns');
     } else {
-        iconPath = path.join(__dirname, 'assets', 'icon.png');
+        iconPath = assetPath('assets/icon.png');
     }
 
     if (process.platform === 'darwin') {
-        const icon = nativeImage.createFromPath(
-            path.join(__dirname, 'assets', 'icon.png') // Use high-res PNG (e.g., 512x512)
-        );
+        const icon = nativeImage.createFromPath(assetPath('assets/icon.png'));
         app.dock.setIcon(icon);
     }
     mainWindow = new BrowserWindow({
@@ -223,12 +229,15 @@ function createWindow() {
         }
     }
 
-    // Windows: keep in taskbar and force our icon (belt-and-suspenders over BrowserWindow icon option)
+    // Windows: keep in taskbar and set our custom icon.
+    // setIcon() is called here AND again in ready-to-show to handle timing edge-cases.
     if (process.platform === 'win32') {
         mainWindow.setSkipTaskbar(false);
-        const winIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico'));
+        const winIcon = nativeImage.createFromPath(assetPath('assets/icon.ico'));
         if (!winIcon.isEmpty()) {
             mainWindow.setIcon(winIcon);
+        } else {
+            console.warn('Windows icon could not be loaded from:', assetPath('assets/icon.ico'));
         }
     }
 
@@ -258,64 +267,54 @@ function createWindow() {
         }
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-            // Windows-specific: Ensure fullscreen and hide taskbar BEFORE showing
             if (process.platform === 'win32') {
-                // Set fullscreen and hide taskbar before showing window
                 mainWindow.setSkipTaskbar(false);
-                //mainWindow.setFullScreen(false);
-                //mainWindow.setAlwaysOnTop(true);
+                mainWindow.setAlwaysOnTop(true, 'screen-saver');
+                // Re-apply icon just before show() — most reliable point for taskbar icon
+                const winIcon2 = nativeImage.createFromPath(assetPath('assets/icon.ico'));
+                if (!winIcon2.isEmpty()) {
+                    mainWindow.setIcon(winIcon2);
+                }
             }
 
             mainWindow.show();
             mainWindow.focus();
 
-            // Additional Windows-specific setup after window is shown
-            // Use multiple attempts to ensure taskbar is hidden and window is on top
             if (process.platform === 'win32') {
-                // Immediate setup - right after show()
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.setSkipTaskbar(false);
-                    //mainWindow.setFullScreen(false);
-                    //mainWindow.setAlwaysOnTop(true);
+                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
                     mainWindow.focus();
                 }
 
-                // First attempt after a brief delay
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                         mainWindow.focus();
                     }
                 }, 50);
 
-                // Second attempt to ensure it sticks
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                         mainWindow.focus();
                     }
                 }, 200);
 
-                // Third attempt for stubborn cases
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                         mainWindow.focus();
                     }
                 }, 500);
 
-                // Fourth attempt for very stubborn cases
                 setTimeout(() => {
                     if (mainWindow && !mainWindow.isDestroyed()) {
                         mainWindow.setSkipTaskbar(false);
-                        //mainWindow.setFullScreen(false);
-                        //mainWindow.setAlwaysOnTop(true);
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
                         mainWindow.focus();
                     }
                 }, 1000);
@@ -406,8 +405,12 @@ function createWindow() {
                 const now = Date.now();
                 lastBlurTime = now;
 
-                // Show warning dialog if Windows key was likely pressed (window lost focus)
-                // Only show dialog if one isn't already showing and it's been at least 2 seconds since last dialog
+                // Immediately re-assert always-on-top and steal focus back
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+                    mainWindow.focus();
+                }
+
                 if (!mainWindow._dialogShowing && (now - (mainWindow._lastDialogTime || 0)) > 2000) {
                     mainWindow._dialogShowing = true;
                     mainWindow._lastDialogTime = now;
@@ -456,8 +459,7 @@ function createWindow() {
                 // Immediate check and setup
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.setSkipTaskbar(false);
-                    //mainWindow.setFullScreen(false);
-                    //mainWindow.setAlwaysOnTop(true);
+                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
                     mainWindow.focus();
                 }
             }
@@ -470,13 +472,11 @@ function createWindow() {
                             mainWindow.setSkipTaskbar(false);
 
                             if (!mainWindow.isFocused()) {
+                                mainWindow.setAlwaysOnTop(true, 'screen-saver');
                                 mainWindow.focus();
                             }
                             if (!mainWindow.isAlwaysOnTop()) {
-                                //mainWindow.setAlwaysOnTop(true);
-                            }
-                            if (!mainWindow.isFullScreen()) {
-                                //mainWindow.setFullScreen(false);
+                                mainWindow.setAlwaysOnTop(true, 'screen-saver');
                             }
 
                             // Ensure window covers entire screen including taskbar area
@@ -518,41 +518,34 @@ function createWindow() {
                                 mainWindow.setSkipTaskbar(false);
                             }
 
-                            // If window loses focus (e.g., Start menu opened), immediately refocus
-                            // BUT: Don't refocus if a dialog is showing (allows user to click OK button)
-                            if (!mainWindow.isFocused() && !mainWindow._dialogShowing) {
-                                const now = Date.now();
-                                // Show dialog if focus was lost and enough time has passed since last dialog
-                                if ((now - (mainWindow._lastDialogTime || 0)) > 2000) {
-                                    mainWindow._dialogShowing = true;
-                                    mainWindow._lastDialogTime = now;
+                            // If window loses focus, always re-assert on-top and focus.
+                            // Only suppress additional dialogs while one is already showing.
+                            if (!mainWindow.isFocused()) {
+                                if (process.platform === 'win32') {
+                                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+                                }
+                                mainWindow.focus();
 
-                                    // Show warning dialog via SweetAlert
-                                    if (mainWindow && !mainWindow.isDestroyed()) {
-                                        mainWindow.webContents.send('show-sweetalert-warning', {
-                                            title: 'Unauthorized Action Detected',
-                                            text: 'Windows key or unauthorized action detected. You are not allowed to access other applications or the Windows Start menu during the exam. Please remain focused on the exam application.',
-                                            icon: 'warning',
-                                            confirmButtonText: 'OK',
-                                            allowOutsideClick: false,
-                                            allowEscapeKey: false
-                                        });
-                                    }
+                                if (!mainWindow._dialogShowing) {
+                                    const now = Date.now();
+                                    if ((now - (mainWindow._lastDialogTime || 0)) > 2000) {
+                                        mainWindow._dialogShowing = true;
+                                        mainWindow._lastDialogTime = now;
 
-                                    // Dialog close will be handled in renderer via IPC
-                                    // Set a timeout to reset dialog flag after reasonable time
-                                    setTimeout(() => {
-                                        mainWindow._dialogShowing = false;
-                                    }, 5000); // Reset after 5 seconds if not already reset
-                                } else {
-                                    // If dialog was shown recently, just refocus without showing another dialog
-                                    mainWindow.focus();
-                                    if (process.platform === 'win32') {
-                                        //mainWindow.setAlwaysOnTop(true);
-                                        // Force fullscreen to close any overlays
-                                        if (!mainWindow.isFullScreen()) {
-                                            //mainWindow.setFullScreen(false);
+                                        if (mainWindow && !mainWindow.isDestroyed()) {
+                                            mainWindow.webContents.send('show-sweetalert-warning', {
+                                                title: 'Unauthorized Action Detected',
+                                                text: 'Windows key or unauthorized action detected. You are not allowed to access other applications or the Windows Start menu during the exam. Please remain focused on the exam application.',
+                                                icon: 'warning',
+                                                confirmButtonText: 'OK',
+                                                allowOutsideClick: false,
+                                                allowEscapeKey: false
+                                            });
                                         }
+
+                                        setTimeout(() => {
+                                            mainWindow._dialogShowing = false;
+                                        }, 5000);
                                     }
                                 }
                             }
@@ -566,14 +559,9 @@ function createWindow() {
                                 // Always ensure taskbar is hidden
                                 mainWindow.setSkipTaskbar(false);
 
-                                // Ensure fullscreen is maintained
-                                if (!mainWindow.isFullScreen()) {
-                                    //mainWindow.setFullScreen(false);
-                                }
-
                                 // Ensure always on top is maintained
                                 if (!mainWindow.isAlwaysOnTop()) {
-                                    //mainWindow.setAlwaysOnTop(true);
+                                    mainWindow.setAlwaysOnTop(true, 'screen-saver');
                                 }
                             }
                         } catch (error) {
