@@ -6,7 +6,7 @@
     body {
       margin: 0;
       padding: 0;
-      background: #024565;
+        background: #f8f8f8;
       color: white;
       font-family: Arial, sans-serif;
       height: 100vh;
@@ -15,7 +15,7 @@
     }
     .controls {
       padding: 10px;
-      background: #024565;
+        background: #ededed;
         display: none; /* Hide the entire controls band */
       gap: 10px;
       flex-shrink: 0;
@@ -429,43 +429,51 @@
         setPermStatus('microphone', 'checking');
         setPermStatus('screen', 'checking');
 
-        // Step 1: request camera + mic via getUserMedia (triggers OS dialog on first run)
-        let cameraOk = false, micOk = false;
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
-            stream.getTracks().forEach(t => t.stop());
-            cameraOk = true;
-            micOk = true;
-        } catch (err) {
-            // Try them individually to distinguish which is denied
-            try {
-                const vs = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
-                vs.getTracks().forEach(t => t.stop());
-                cameraOk = true;
-            } catch {
-            }
-            try {
-                const as = await navigator.mediaDevices.getUserMedia({video: false, audio: true});
-                as.getTracks().forEach(t => t.stop());
-                micOk = true;
-            } catch {
-            }
-        }
+        let cameraOk = false, micOk = false, screenOk = false;
 
-        // Step 2: trigger screen recording TCC prompt via main process
-        let screenOk = false;
-        try {
-            screenOk = await window.electronAPI.requestScreenPermission();
-        } catch {
-        }
-
-        // Step 3: read authoritative macOS TCC status (overrides getUserMedia result on macOS)
+        // Step 1: read authoritative TCC / OS permission status.
+        // On non-macOS (Windows/Linux) this immediately returns 'granted' for all,
+        // so we skip the getUserMedia test entirely — opening and immediately closing
+        // the camera on Windows causes a MediaFoundation Frame Server race condition
+        // that makes the subsequent iframe getUserMedia call time out.
         if (window.electronAPI && window.electronAPI.getMediaAccessStatus) {
             try {
                 const s = await window.electronAPI.getMediaAccessStatus();
                 cameraOk = s.camera === 'granted';
                 micOk = s.microphone === 'granted';
                 screenOk = s.screen === 'granted';
+            } catch {
+            }
+        }
+
+        // Step 2: on macOS, TCC may report 'not-determined' until getUserMedia is called,
+        // so trigger the OS prompt and try individually to surface which is denied.
+        if (!cameraOk || !micOk) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+                stream.getTracks().forEach(t => t.stop());
+                cameraOk = true;
+                micOk = true;
+            } catch (err) {
+                try {
+                    const vs = await navigator.mediaDevices.getUserMedia({video: true, audio: false});
+                    vs.getTracks().forEach(t => t.stop());
+                    cameraOk = true;
+                } catch {
+                }
+                try {
+                    const as = await navigator.mediaDevices.getUserMedia({video: false, audio: true});
+                    as.getTracks().forEach(t => t.stop());
+                    micOk = true;
+                } catch {
+                }
+            }
+        }
+
+        // Step 3: trigger screen recording TCC prompt via main process (needed on macOS)
+        if (!screenOk) {
+            try {
+                screenOk = await window.electronAPI.requestScreenPermission();
             } catch {
             }
         }

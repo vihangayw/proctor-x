@@ -27,6 +27,14 @@ app.commandLine.appendSwitch('enable-usermedia-screen-capturing')
 app.commandLine.appendSwitch('allow-http-screen-capture')
 app.commandLine.appendSwitch('disable-site-isolation-trials')
 
+// Windows: force DirectShow instead of MediaFoundation for camera capture.
+// MediaFoundation's Camera Frame Server on Windows 11 24H2 takes too long to
+// release the device after checkPermissions() stops the stream, causing
+// "Timeout starting video zone" when the iframe immediately re-opens the camera.
+if (process.platform === 'win32') {
+    app.commandLine.appendSwitch('disable-features', 'MediaFoundationVideoCapture')
+}
+
 let mainWindow
 
 let deeplinkData = null;
