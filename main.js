@@ -12,6 +12,9 @@ const {
     shell
 } = require('electron')
 const path = require('path')
+const {spawn} = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
 
@@ -36,6 +39,155 @@ if (process.platform === 'win32') {
 }
 
 let mainWindow
+
+// Windows-only: handles for background OS-level security helpers
+let winKeyBlockerProcess = null;
+let windowMonitorProcess = null;
+
+// Installs a WH_KEYBOARD_LL hook via a hidden PowerShell process.
+// The hook intercepts VK_LWIN, VK_RWIN, and Ctrl+Esc at the OS level —
+// before Windows can route them to the Start menu — so the Start menu never
+// opens even though our Electron window doesn't hold a keyboard hook natively.
+function startWindowsKeyBlocker() {
+    if (process.platform !== 'win32') return;
+
+    const psScript = `
+Add-Type -ReferencedAssemblies System.Windows.Forms @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+public class WinKeyBlocker {
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError=true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", SetLastError=true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN     = 0x0100;
+    private const int WM_SYSKEYDOWN  = 0x0104;
+    private const int VK_LWIN        = 0x5B;
+    private const int VK_RWIN        = 0x5C;
+    private const int VK_ESCAPE      = 0x1B;
+    private const int VK_CONTROL     = 0x11;
+
+    private static IntPtr _hook = IntPtr.Zero;
+    private static LowLevelKeyboardProc _proc;
+
+    public static void Start() {
+        _proc = HookCallback;
+        using (var p = Process.GetCurrentProcess())
+        using (var m = p.MainModule)
+            _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(m.ModuleName), 0);
+        Application.Run();
+    }
+
+    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0 && (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)) {
+            int vk = Marshal.ReadInt32(lParam);
+            if (vk == VK_LWIN || vk == VK_RWIN)
+                return (IntPtr)1;
+            if (vk == VK_ESCAPE && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
+                return (IntPtr)1;
+        }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+}
+"@
+[WinKeyBlocker]::Start()
+`;
+
+    try {
+        const scriptPath = path.join(os.tmpdir(), 'proctorx-kb.ps1');
+        fs.writeFileSync(scriptPath, psScript, 'utf8');
+        winKeyBlockerProcess = spawn('powershell.exe', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-WindowStyle', 'Hidden', '-File', scriptPath
+        ], {windowsHide: true});
+        winKeyBlockerProcess.on('error', (e) => console.error('[WinKeyBlocker] error:', e));
+        console.log('[WinKeyBlocker] started, PID:', winKeyBlockerProcess.pid);
+    } catch (e) {
+        console.error('[WinKeyBlocker] failed to start:', e);
+    }
+}
+
+// Spawns a hidden PowerShell loop that minimizes any foreground window not
+// owned by our process.  Acts as a backstop for any attack vector that gets
+// past the keyboard blocker (e.g. Alt+Tab after an unexpected focus loss).
+function startWindowMonitor(examPID) {
+    if (process.platform !== 'win32') return;
+
+    const psScript = `
+param([int]$ExamPID)
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hwnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern int GetWindowThreadProcessId(IntPtr hwnd, out int lpdwProcessId);
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+}
+"@
+
+while ($true) {
+    try {
+        $fg = [Win32]::GetForegroundWindow()
+        [int]$fgPID = 0
+        [Win32]::GetWindowThreadProcessId($fg, [ref]$fgPID) | Out-Null
+        if ($fgPID -ne 0 -and $fgPID -ne $ExamPID -and [Win32]::IsWindowVisible($fg)) {
+            [Win32]::ShowWindow($fg, 6) | Out-Null
+        }
+    } catch {}
+    Start-Sleep -Milliseconds 100
+}
+`;
+
+    try {
+        const scriptPath = path.join(os.tmpdir(), 'proctorx-wmon.ps1');
+        fs.writeFileSync(scriptPath, psScript, 'utf8');
+        windowMonitorProcess = spawn('powershell.exe', [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass',
+            '-WindowStyle', 'Hidden', '-File', scriptPath,
+            '-ExamPID', String(examPID)
+        ], {windowsHide: true});
+        windowMonitorProcess.on('error', (e) => console.error('[WindowMonitor] error:', e));
+        console.log('[WindowMonitor] started, PID:', windowMonitorProcess.pid);
+    } catch (e) {
+        console.error('[WindowMonitor] failed to start:', e);
+    }
+}
+
+function stopWindowsHelpers() {
+    if (winKeyBlockerProcess) {
+        try {
+            winKeyBlockerProcess.kill();
+        } catch {
+        }
+        winKeyBlockerProcess = null;
+    }
+    if (windowMonitorProcess) {
+        try {
+            windowMonitorProcess.kill();
+        } catch {
+        }
+        windowMonitorProcess = null;
+    }
+}
 
 let deeplinkData = null;
 let multipleDisplayAlertShowing = false; // Track if multiple display alert is showing
@@ -585,6 +737,12 @@ function createWindow() {
             }, 200); // Start aggressive monitoring after 200ms (reduced from 1500ms for faster response)
         });
 
+        // Start OS-level helpers: keyboard blocker + window monitor
+        mainWindow.once('ready-to-show', () => {
+            startWindowsKeyBlocker();
+            startWindowMonitor(process.pid);
+        });
+
         // Clean up intervals on window close
         mainWindow.on('closed', () => {
             if (focusInterval) {
@@ -933,8 +1091,8 @@ ipcMain.on('multiple-display-alert-closed', () => {
 
 // Clean up global shortcuts on quit
 app.on('will-quit', () => {
-    // Unregister all global shortcuts
     globalShortcut.unregisterAll();
+    stopWindowsHelpers();
 });
 
 // Quit when all windows are closed - force quit completely
