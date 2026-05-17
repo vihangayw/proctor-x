@@ -294,6 +294,20 @@ function createWindow() {
                 setTimeout(enforceWin, 500);
                 setTimeout(enforceWin, 1000);
             }
+
+            if (process.platform === 'darwin') {
+                const enforceMac = () => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.setAlwaysOnTop(true, 'screen-saver');
+                        mainWindow.focus();
+                    }
+                };
+                enforceMac();
+                setTimeout(enforceMac, 50);
+                setTimeout(enforceMac, 200);
+                setTimeout(enforceMac, 500);
+                setTimeout(enforceMac, 1000);
+            }
         }
     });
 
@@ -369,10 +383,13 @@ function createWindow() {
             }
         }
     });
-    // macOS: warn + refocus when the app loses focus
+    // macOS: warn + refocus when the app loses focus; re-assert screen-saver level to stay above Teams/Zoom PiP
     if (process.platform === 'darwin') {
         mainWindow._dialogShowing = false;
         mainWindow.on('blur', () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.setAlwaysOnTop(true, 'screen-saver');
+            }
             const now = Date.now();
             if (!mainWindow._dialogShowing && (now - (mainWindow._lastDialogTime || 0)) > 2000) {
                 mainWindow._dialogShowing = true;
@@ -398,6 +415,17 @@ function createWindow() {
                 }
             }, 300);
         });
+
+        const macFocusInterval = setInterval(() => {
+            if (!mainWindow || mainWindow.isDestroyed()) {
+                clearInterval(macFocusInterval);
+                return;
+            }
+            if (!mainWindow.isAlwaysOnTop()) {
+                mainWindow.setAlwaysOnTop(true, 'screen-saver');
+            }
+        }, 500);
+        mainWindow.on('closed', () => clearInterval(macFocusInterval));
     }
 
     // Keep window focused and on top (Windows + Linux)
