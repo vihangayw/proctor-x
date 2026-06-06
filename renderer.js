@@ -1989,7 +1989,7 @@ async function captureScreenFrameToCanvas(stream) {
             const bitmap = await ic.grabFrame();
             try {
                 const canvas = document.createElement('canvas');
-                const scaleFactor = 1.55;
+                const scaleFactor = 1.70;
                 canvas.width = Math.max(1, Math.floor(bitmap.width * scaleFactor));
                 canvas.height = Math.max(1, Math.floor(bitmap.height * scaleFactor));
                 const ctx = canvas.getContext('2d');
@@ -2031,7 +2031,7 @@ async function captureScreenFrameToCanvas(stream) {
     }
 
     const canvas = document.createElement('canvas');
-    const scaleFactor = 1.55;
+    const scaleFactor = 1.70;
     canvas.width = vw * scaleFactor;
     canvas.height = vh * scaleFactor;
     const ctx = canvas.getContext('2d');
