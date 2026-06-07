@@ -79,6 +79,7 @@ public class WinKeyBlocker {
     private const int VK_RWIN        = 0x5C;
     private const int VK_ESCAPE      = 0x1B;
     private const int VK_CONTROL     = 0x11;
+    private const int VK_SNAPSHOT    = 0x2C; // Print Screen
 
     private static IntPtr _hook = IntPtr.Zero;
     private static LowLevelKeyboardProc _proc;
@@ -98,6 +99,8 @@ public class WinKeyBlocker {
                 return (IntPtr)1;
             if (vk == VK_ESCAPE && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
                 return (IntPtr)1;
+            if (vk == VK_SNAPSHOT)
+                return (IntPtr)1; // Block Print Screen / Win+PrintScreen
         }
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
@@ -546,9 +549,9 @@ function createWindow() {
         updateExamFrame(frameRoutingId, url);
     });
 
-    // Optional: Make sure window stays fullscreen even if user tries to exit
+    // Force fullscreen back if student somehow exits it (e.g. via F11 edge case)
     mainWindow.on('leave-full-screen', () => {
-        //mainWindow.setFullScreen(false)
+        mainWindow.setFullScreen(true);
     })
 
     // Windows-specific: Keep window focused and on top
@@ -762,6 +765,18 @@ function createWindow() {
             return;
         }
 
+        // Block F11 (fullscreen toggle) on all platforms
+        if (input.key === 'F11') {
+            event.preventDefault();
+            return;
+        }
+
+        // Block Print Screen (screen capture) — key name varies by platform/driver
+        if (input.key === 'PrintScreen' || input.key === 'Snapshot' || input.key === 'Print') {
+            event.preventDefault();
+            return;
+        }
+
         // Windows-specific: Block Alt+Tab and other escape mechanisms
         if (process.platform === 'win32') {
             // Block Alt+Tab (Alt key + Tab key)
@@ -881,6 +896,16 @@ app.on('web-contents-created', (_, contents) => {
     // Block Tab key and Windows-specific shortcuts on all windows
     contents.on('before-input-event', (event, input) => {
         if (input.key === 'Tab') {
+            event.preventDefault();
+        }
+
+        // Block F11 (fullscreen toggle) on all platforms
+        if (input.key === 'F11') {
+            event.preventDefault();
+        }
+
+        // Block Print Screen on all platforms
+        if (input.key === 'PrintScreen' || input.key === 'Snapshot' || input.key === 'Print') {
             event.preventDefault();
         }
 
@@ -1307,6 +1332,11 @@ app.whenReady().then(() => {
         for (let i = 1; i <= 9; i++) {
             registerShortcut(`Super+${i}`, `Win+${i}`);
         }
+
+        // Block Print Screen variants (screen capture to clipboard / Snipping Tool)
+        ['PrintScreen', 'Shift+PrintScreen', 'Control+PrintScreen', 'Alt+PrintScreen'].forEach(sc => {
+            registerShortcut(sc, sc);
+        });
 
         // Additional aggressive blocking will be set up after window is created
         // (moved to createWindow function to avoid accessing mainWindow before it exists)

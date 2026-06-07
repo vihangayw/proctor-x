@@ -967,11 +967,35 @@ function disableTabKey() {
             e.stopImmediatePropagation();
             return false;
         }
+        if (e.key === 'F11') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
+        if (e.key === 'PrintScreen' || e.key === 'Snapshot' || e.key === 'Print') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
     }, true); // Use capture phase to catch before iframe
 
     // Also listen on window level
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Tab' || e.keyCode === 9) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
+        if (e.key === 'F11') {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            return false;
+        }
+        if (e.key === 'PrintScreen' || e.key === 'Snapshot' || e.key === 'Print') {
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
@@ -1950,7 +1974,7 @@ const uploadScreenCapture = async (sqid) => {
         await video.play();
 
         const canvas = document.createElement('canvas');
-        const scaleFactor = 1.55;
+        const scaleFactor = 1.70;
         canvas.width = video.videoWidth * scaleFactor;
         canvas.height = video.videoHeight * scaleFactor;
         const ctx = canvas.getContext('2d');
