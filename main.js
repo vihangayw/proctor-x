@@ -175,7 +175,43 @@ while ($true) {
     }
 }
 
+// Disables Task Manager via registry so Ctrl+Alt+Del cannot open it.
+// Ctrl+Alt+Del itself is a kernel-level SAS and cannot be blocked by user-mode
+// hooks, but disabling Task Manager removes the main threat it enables.
+function disableTaskManager() {
+    if (process.platform !== 'win32') return;
+    try {
+        spawn('reg', [
+            'add',
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',
+            '/v', 'DisableTaskMgr',
+            '/t', 'REG_DWORD',
+            '/d', '1',
+            '/f'
+        ], {windowsHide: true});
+        console.log('[TaskMgrBlock] Task Manager disabled via registry');
+    } catch (e) {
+        console.error('[TaskMgrBlock] failed:', e);
+    }
+}
+
+function restoreTaskManager() {
+    if (process.platform !== 'win32') return;
+    try {
+        spawn('reg', [
+            'delete',
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System',
+            '/v', 'DisableTaskMgr',
+            '/f'
+        ], {windowsHide: true});
+        console.log('[TaskMgrBlock] Task Manager re-enabled');
+    } catch (e) {
+        console.error('[TaskMgrBlock] restore failed:', e);
+    }
+}
+
 function stopWindowsHelpers() {
+    restoreTaskManager();
     if (winKeyBlockerProcess) {
         try {
             winKeyBlockerProcess.kill();
@@ -740,10 +776,11 @@ function createWindow() {
             }, 200); // Start aggressive monitoring after 200ms (reduced from 1500ms for faster response)
         });
 
-        // Start OS-level helpers: keyboard blocker + window monitor
+        // Start OS-level helpers: keyboard blocker + window monitor + Task Manager lock
         mainWindow.once('ready-to-show', () => {
             startWindowsKeyBlocker();
             startWindowMonitor(process.pid);
+            disableTaskManager();
         });
 
         // Clean up intervals on window close
