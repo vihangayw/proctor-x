@@ -12,6 +12,9 @@ const {
     shell
 } = require('electron')
 const path = require('path')
+const fs = require('fs')
+const os = require('os')
+const {spawnSync} = require('child_process');
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
 
@@ -1107,16 +1110,126 @@ ipcMain.on('multiple-display-alert-closed', () => {
     multipleDisplayAlertShowing = false;
 });
 
-// Clean up global shortcuts on quit
-app.on('will-quit', () => {
-    // Unregister all global shortcuts
+// --- macOS screenshot suppression via redirect + immediate delete ---
+// globalShortcut (Carbon RegisterEventHotKey) fires AFTER screencaptureui has already
+// processed the event, so it cannot prevent the screenshot from being written.
+// Instead we redirect the save location to a temp folder and delete files on arrival.
+// Clipboard screenshots (Ctrl+Cmd+Shift+3/4) are handled by clearing the clipboard
+// in the globalShortcut callbacks below.
+let _screenshotBlockDir = null;
+let _screenshotWatcher = null;
+let _savedScreenshotLocation = null;
+
+// Crash-recovery file: written BEFORE we touch defaults, deleted on clean teardown.
+// If a previous run crashed, this file exists and tells us the true original location.
+const SCREENSHOT_RECOVERY_FILE = path.join(os.homedir(), '.proctorx-screenshot-backup');
+
+function _restoreScreenshotDefaults(originalLocation) {
+    if (originalLocation) {
+        spawnSync('defaults', ['write', 'com.apple.screencapture', 'location', originalLocation]);
+    } else {
+        spawnSync('defaults', ['delete', 'com.apple.screencapture', 'location']);
+    }
+    spawnSync('defaults', ['delete', 'com.apple.screencapture', 'show-thumbnail']);
+    spawnSync('defaults', ['delete', 'com.apple.screencapture', 'sound']);
+    spawnSync('killall', ['SystemUIServer']);
+}
+
+function recoverScreenshotSettingsIfNeeded() {
+    if (process.platform !== 'darwin') return;
+    try {
+        const raw = fs.readFileSync(SCREENSHOT_RECOVERY_FILE, 'utf8');
+        const {location} = JSON.parse(raw);
+        _restoreScreenshotDefaults(location || null);
+        fs.unlinkSync(SCREENSHOT_RECOVERY_FILE);
+        console.log('Restored screenshot settings from crash recovery file');
+    } catch {
+        // No recovery file — previous run was clean, nothing to do.
+    }
+}
+
+function setupMacOSScreenshotIntercept() {
+    if (process.platform !== 'darwin') return;
+
+    // Read the CURRENT (true original) location before we touch anything.
+    const readLoc = spawnSync('defaults', ['read', 'com.apple.screencapture', 'location'], {encoding: 'utf8'});
+    _savedScreenshotLocation = readLoc.status === 0 ? readLoc.stdout.trim() : null;
+
+    // Write recovery file to disk BEFORE modifying defaults.
+    // If the app crashes, the next launch will read this and restore properly.
+    try {
+        fs.writeFileSync(SCREENSHOT_RECOVERY_FILE, JSON.stringify({location: _savedScreenshotLocation}));
+    } catch (e) {
+        console.warn('Could not write screenshot recovery file:', e.message);
+    }
+
+    // Create a temp directory to absorb screenshots
+    _screenshotBlockDir = path.join(os.tmpdir(), `proctorx-ss-${Date.now()}`);
+    fs.mkdirSync(_screenshotBlockDir, {recursive: true});
+
+    // Redirect screenshots here and suppress UI feedback
+    spawnSync('defaults', ['write', 'com.apple.screencapture', 'location', _screenshotBlockDir]);
+    spawnSync('defaults', ['write', 'com.apple.screencapture', 'show-thumbnail', '-bool', 'false']);
+    spawnSync('defaults', ['write', 'com.apple.screencapture', 'sound', 'disabled', '-bool', 'true']);
+
+    // Watch and delete any file that appears
+    _screenshotWatcher = fs.watch(_screenshotBlockDir, (event, filename) => {
+        if (!filename) return;
+        const filepath = path.join(_screenshotBlockDir, filename);
+        try {
+            fs.unlinkSync(filepath);
+        } catch { /* already gone */
+        }
+    });
+
+    console.log('macOS screenshot intercept active — redirecting to', _screenshotBlockDir);
+}
+
+function teardownMacOSScreenshotIntercept() {
+    if (process.platform !== 'darwin') return;
+
+    if (_screenshotWatcher) {
+        _screenshotWatcher.close();
+        _screenshotWatcher = null;
+    }
+
+    _restoreScreenshotDefaults(_savedScreenshotLocation);
+
+    // Remove temp directory
+    if (_screenshotBlockDir) {
+        try {
+            fs.rmSync(_screenshotBlockDir, {recursive: true, force: true});
+        } catch {
+        }
+        _screenshotBlockDir = null;
+    }
+
+    // Remove recovery file — clean exit, nothing to recover next time.
+    try {
+        fs.unlinkSync(SCREENSHOT_RECOVERY_FILE);
+    } catch {
+    }
+
+    console.log('macOS screenshot intercept removed');
+}
+
+// Safe exit: always tear down screenshot intercept and shortcuts before exiting.
+// Must be used instead of app.exit() because app.exit() skips the will-quit event.
+function safeExit(code = 0) {
+    teardownMacOSScreenshotIntercept();
     globalShortcut.unregisterAll();
+    app.exit(code);
+}
+
+// Clean up global shortcuts on quit (safety net for any app.quit() paths)
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    teardownMacOSScreenshotIntercept();
 });
 
 // Quit when all windows are closed - force quit completely
 app.on('window-all-closed', () => {
-    // Force quit the application completely on all platforms
-    app.exit(0);
+    safeExit(0);
 })
 ipcMain.handle('show-dialog', async (_, options) => {
     const result = await dialog.showMessageBox({
@@ -1133,7 +1246,7 @@ ipcMain.handle('show-dialog', async (_, options) => {
 // Force quit — bypasses the window close event (used from permission overlay)
 ipcMain.on('force-quit-app', () => {
     console.log('Force quit command received');
-    app.exit(0);
+    safeExit(0);
 });
 
 ipcMain.on('quit-app', () => {
@@ -1231,6 +1344,9 @@ function setupDisplayMonitoring() {
 }
 
 app.whenReady().then(() => {
+    // Restore screenshot defaults if a previous run crashed without cleaning up.
+    recoverScreenshotSettingsIfNeeded();
+
     // Check for deep link URL in command line arguments (Windows initial launch)
     console.log('🔍 Checking process.argv for deep link URL...');
     console.log('🔍 process.argv:', process.argv);
@@ -1354,6 +1470,38 @@ app.whenReady().then(() => {
                 console.warn(`Could not block ${desc}:`, error.message);
             }
         }
+
+        // Screenshot shortcuts: the file is intercepted by the redirect watcher below.
+        // Clipboard screenshots (Ctrl+Cmd+Shift+3/4) bypass the file system, so we clear
+        // the clipboard in the callback.
+        const {clipboard} = require('electron');
+        const screenshotShortcuts = [
+            'Command+Shift+3',
+            'Command+Shift+4',
+            'Command+Shift+5',
+            'Command+Shift+6',
+            'Control+Command+Shift+3',
+            'Control+Command+Shift+4',
+        ];
+        for (const accelerator of screenshotShortcuts) {
+            try {
+                globalShortcut.register(accelerator, () => {
+                    console.log(`${accelerator} screenshot attempt intercepted`);
+                    // Show full-screen warning overlay in renderer
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                        mainWindow.webContents.send('show-screenshot-warning');
+                    }
+                    // Clear clipboard shortly after — handles Ctrl+Cmd+Shift copies
+                    setTimeout(() => clipboard.clear(), 300);
+                });
+            } catch (error) {
+                console.warn(`Could not register screenshot intercept for ${accelerator}:`, error.message);
+            }
+        }
+
+        // Redirect screenshots to a watched temp folder so files are deleted on arrival.
+        // Carbon-level globalShortcuts fire too late to stop screencaptureui from writing the file.
+        setupMacOSScreenshotIntercept();
     }
 
     // Block Alt+F4 on Windows
@@ -1412,10 +1560,10 @@ app.whenReady().then(() => {
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('send-exit-audit-log');
                             setTimeout(() => {
-                                app.exit(0);
+                                safeExit(0);
                             }, 500);
                         } else {
-                            app.exit(0);
+                            safeExit(0);
                         }
                     }
                 };

@@ -1394,11 +1394,54 @@ const setupSweetAlertHandlers = () => {
     }
 };
 
+// === Screenshot Warning Overlay ===
+function setupScreenshotWarningHandler() {
+    if (!window.electronAPI || !window.electronAPI.onScreenshotWarning) return;
+
+    let dismissTimer = null;
+
+    window.electronAPI.onScreenshotWarning(() => {
+        let overlay = document.getElementById('proctorx-screenshot-overlay');
+
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'proctorx-screenshot-overlay';
+            overlay.style.cssText = [
+                'position:fixed', 'inset:0', 'z-index:2147483647',
+                'background:#000', 'display:flex', 'flex-direction:column',
+                'align-items:center', 'justify-content:center',
+                'color:#fff', 'font-family:system-ui,-apple-system,sans-serif',
+                'pointer-events:none',
+            ].join(';');
+            overlay.innerHTML = `
+                <div style="text-align:center;max-width:520px;padding:48px 32px;">
+                    <div style="font-size:72px;margin-bottom:24px;line-height:1">⚠</div>
+                    <h1 style="font-size:28px;font-weight:700;margin:0 0 16px;color:#ff4444;letter-spacing:-0.5px">
+                        Screen Capture Not Permitted
+                    </h1>
+                    <p style="font-size:17px;line-height:1.65;color:#ccc;margin:0">
+                        Recording or capturing this screen is not allowed during your examination.<br><br>
+                        This attempt has been logged and will be reviewed by your proctor.
+                    </p>
+                </div>`;
+            document.body.appendChild(overlay);
+        }
+
+        overlay.style.display = 'flex';
+
+        clearTimeout(dismissTimer);
+        dismissTimer = setTimeout(() => {
+            if (overlay) overlay.style.display = 'none';
+        }, 5000);
+    });
+}
+
 // Set up handlers immediately (don't wait for DOMContentLoaded)
 // This ensures handlers are ready before IPC messages arrive
 if (window.electronAPI) {
     console.log('Setting up SweetAlert handlers immediately');
     setupSweetAlertHandlers();
+    setupScreenshotWarningHandler();
 } else {
     console.warn('electronAPI not available yet, will retry');
     // Retry when electronAPI becomes available
@@ -1407,6 +1450,7 @@ if (window.electronAPI) {
             clearInterval(checkElectronAPI);
             console.log('electronAPI now available, setting up handlers');
             setupSweetAlertHandlers();
+            setupScreenshotWarningHandler();
         }
     }, 100);
     

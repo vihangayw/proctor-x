@@ -41,4 +41,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNetworkStatusUpdate: (callback) => ipcRenderer.on('network-status-update', (event, data) => callback(data)),
   onSendExitAuditLog: (callback) => ipcRenderer.on('send-exit-audit-log', (event) => callback()),
   setExamMode: (active) => ipcRenderer.send('set-exam-mode', active),
+    onScreenshotWarning: (callback) => ipcRenderer.on('show-screenshot-warning', (_event) => callback()),
 });
