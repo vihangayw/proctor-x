@@ -1110,6 +1110,193 @@ ipcMain.on('multiple-display-alert-closed', () => {
     multipleDisplayAlertShowing = false;
 });
 
+// ---- Linux Super key blocker ----
+// Disables the Super (Windows) key at the DE/X11 level on app start so students
+// cannot open the app launcher while the exam app is running.
+// Backs up the current settings, writes a crash-recovery file, and restores
+// everything on clean exit or next launch after a crash (like the macOS
+// screenshot intercept below).
+
+const LINUX_SUPER_KEY_RECOVERY_FILE = path.join(os.homedir(), '.proctorx-superkey-backup');
+let _linuxSuperKeyBackup = null;
+
+function _detectLinuxDE() {
+    const xdg = (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase();
+    const sess = (process.env.DESKTOP_SESSION || '').toLowerCase();
+    if (xdg.includes('gnome') || xdg.includes('unity') || sess.includes('gnome') || sess.includes('ubuntu')) return 'gnome';
+    if (xdg.includes('kde') || xdg.includes('plasma') || sess.includes('plasma') || sess.includes('kde')) return 'kde';
+    if (xdg.includes('xfce') || sess.includes('xfce')) return 'xfce';
+    return 'unknown';
+}
+
+function _isX11Session() {
+    const t = (process.env.XDG_SESSION_TYPE || '').toLowerCase();
+    if (t === 'wayland') return false;
+    if (t === 'x11') return true;
+    return !!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
+}
+
+function startLinuxSuperKeyBlocker() {
+    if (process.platform !== 'linux') return;
+    try {
+        const de = _detectLinuxDE();
+        const x11 = _isX11Session();
+        const backup = {de, x11};
+        console.log(`[SuperKeyBlocker] starting — DE=${de}, X11=${x11}`);
+
+        if (de === 'gnome') {
+            const gsGet = (schema, key) => {
+                const r = spawnSync('gsettings', ['get', schema, key], {encoding: 'utf8'});
+                return r.status === 0 ? r.stdout.trim() : null;
+            };
+
+            // overlay-key: bare Super press opens Activities / app overview
+            backup.gnomeOverlayKey = gsGet('org.gnome.mutter', 'overlay-key') ?? "'Super_L'";
+            spawnSync('gsettings', ['set', 'org.gnome.mutter', 'overlay-key', ''], {encoding: 'utf8'});
+
+            // toggle-overview keybinding (GNOME 40+)
+            backup.gnomeToggleOverview = gsGet('org.gnome.shell.keybindings', 'toggle-overview');
+            if (backup.gnomeToggleOverview != null) {
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-overview', '[]'], {encoding: 'utf8'});
+            }
+
+            // toggle-application-view (app grid shortcut, often Super+A)
+            backup.gnomeToggleAppGrid = gsGet('org.gnome.shell.keybindings', 'toggle-application-view');
+            if (backup.gnomeToggleAppGrid != null) {
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-application-view', '[]'], {encoding: 'utf8'});
+            }
+
+            console.log('[SuperKeyBlocker] GNOME: overlay-key cleared');
+        }
+
+        if (de === 'kde') {
+            const kwrite = fs.existsSync('/usr/bin/kwriteconfig6') ? 'kwriteconfig6' : 'kwriteconfig5';
+            const qdbus = fs.existsSync('/usr/bin/qdbus6') ? 'qdbus6' : 'qdbus';
+            backup.kwrite = kwrite;
+            backup.qdbus = qdbus;
+            backup.kdeMeta = 'org.kde.plasmashell,/PlasmaShell,org.kde.PlasmaShell,activateLauncherMenu';
+            spawnSync(kwrite, ['--file', 'kwinrc', '--group', 'ModifierOnlyShortcuts', '--key', 'Meta', ''], {encoding: 'utf8'});
+            spawnSync(qdbus, ['org.kde.KWin', '/KWin', 'reconfigure'], {encoding: 'utf8'});
+            console.log('[SuperKeyBlocker] KDE: Meta modifier-only shortcut cleared');
+        }
+
+        if (de === 'xfce') {
+            const xfcePaths = ['/commands/custom/<Super>'];
+            backup.xfceBindings = [];
+            for (const p of xfcePaths) {
+                const r = spawnSync('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p], {encoding: 'utf8'});
+                if (r.status === 0) {
+                    backup.xfceBindings.push({path: p, value: r.stdout.trim()});
+                    spawnSync('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p, '-r'], {encoding: 'utf8'});
+                }
+            }
+            console.log('[SuperKeyBlocker] XFCE: Super bindings cleared');
+        }
+
+        // X11 (any DE): remap Super keycodes to nothing via xmodmap as an additional layer
+        if (x11) {
+            const pke = spawnSync('xmodmap', ['-pke'], {encoding: 'utf8'});
+            if (pke.status === 0) {
+                const xmPath = path.join(os.tmpdir(), `proctorx-xmodmap-${Date.now()}.txt`);
+                try {
+                    fs.writeFileSync(xmPath, pke.stdout);
+                    backup.xmodmapPath = xmPath;
+                } catch {
+                }
+            }
+            spawnSync('xmodmap', ['-e', 'keycode 133 = '], {encoding: 'utf8'}); // Super_L
+            spawnSync('xmodmap', ['-e', 'keycode 134 = '], {encoding: 'utf8'}); // Super_R
+            spawnSync('xmodmap', ['-e', 'clear mod4'], {encoding: 'utf8'});
+            console.log('[SuperKeyBlocker] X11: xmodmap Super keys cleared');
+        }
+
+        // Crash-recovery: written BEFORE we consider done, deleted on clean exit.
+        try {
+            fs.writeFileSync(LINUX_SUPER_KEY_RECOVERY_FILE, JSON.stringify(backup));
+        } catch {
+        }
+        _linuxSuperKeyBackup = backup;
+        console.log('[SuperKeyBlocker] Linux Super key blocked');
+    } catch (e) {
+        console.error('[SuperKeyBlocker] start failed:', e.message);
+    }
+}
+
+function stopLinuxSuperKeyBlocker() {
+    if (process.platform !== 'linux') return;
+    const backup = _linuxSuperKeyBackup || (() => {
+        try {
+            return JSON.parse(fs.readFileSync(LINUX_SUPER_KEY_RECOVERY_FILE, 'utf8'));
+        } catch {
+            return null;
+        }
+    })();
+    if (!backup) return;
+    try {
+        const {de, x11} = backup;
+
+        if (de === 'gnome') {
+            spawnSync('gsettings', ['set', 'org.gnome.mutter', 'overlay-key', backup.gnomeOverlayKey ?? "'Super_L'"], {encoding: 'utf8'});
+            if (backup.gnomeToggleOverview != null) {
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-overview', backup.gnomeToggleOverview], {encoding: 'utf8'});
+            }
+            if (backup.gnomeToggleAppGrid != null) {
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-application-view', backup.gnomeToggleAppGrid], {encoding: 'utf8'});
+            }
+            console.log('[SuperKeyBlocker] GNOME: overlay-key restored');
+        }
+
+        if (de === 'kde') {
+            const kwrite = backup.kwrite || 'kwriteconfig5';
+            const qdbus = backup.qdbus || 'qdbus';
+            const meta = backup.kdeMeta || 'org.kde.plasmashell,/PlasmaShell,org.kde.PlasmaShell,activateLauncherMenu';
+            spawnSync(kwrite, ['--file', 'kwinrc', '--group', 'ModifierOnlyShortcuts', '--key', 'Meta', meta], {encoding: 'utf8'});
+            spawnSync(qdbus, ['org.kde.KWin', '/KWin', 'reconfigure'], {encoding: 'utf8'});
+            console.log('[SuperKeyBlocker] KDE: Meta key restored');
+        }
+
+        if (de === 'xfce' && Array.isArray(backup.xfceBindings)) {
+            for (const {path: p, value} of backup.xfceBindings) {
+                spawnSync('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p, '-s', value], {encoding: 'utf8'});
+            }
+            console.log('[SuperKeyBlocker] XFCE: Super bindings restored');
+        }
+
+        if (x11 && backup.xmodmapPath) {
+            try {
+                if (fs.existsSync(backup.xmodmapPath)) {
+                    spawnSync('xmodmap', [backup.xmodmapPath], {encoding: 'utf8'});
+                    spawnSync('xmodmap', ['-e', 'add mod4 = Super_L Super_R'], {encoding: 'utf8'});
+                    fs.unlinkSync(backup.xmodmapPath);
+                    console.log('[SuperKeyBlocker] X11: xmodmap restored');
+                }
+            } catch (e) {
+                console.warn('[SuperKeyBlocker] xmodmap restore failed:', e.message);
+            }
+        }
+    } catch (e) {
+        console.error('[SuperKeyBlocker] stop failed:', e.message);
+    }
+    try {
+        fs.unlinkSync(LINUX_SUPER_KEY_RECOVERY_FILE);
+    } catch {
+    }
+    _linuxSuperKeyBackup = null;
+    console.log('[SuperKeyBlocker] Linux Super key unblocked');
+}
+
+function recoverLinuxSuperKeyIfNeeded() {
+    if (process.platform !== 'linux') return;
+    try {
+        const raw = fs.readFileSync(LINUX_SUPER_KEY_RECOVERY_FILE, 'utf8');
+        _linuxSuperKeyBackup = JSON.parse(raw);
+        stopLinuxSuperKeyBlocker();
+        console.log('[SuperKeyBlocker] Restored Super key from crash-recovery file');
+    } catch {
+        // No recovery file — previous run was clean, nothing to do
+    }
+}
+
 // --- macOS screenshot suppression via redirect + immediate delete ---
 // globalShortcut (Carbon RegisterEventHotKey) fires AFTER screencaptureui has already
 // processed the event, so it cannot prevent the screenshot from being written.
@@ -1217,6 +1404,7 @@ function teardownMacOSScreenshotIntercept() {
 // Must be used instead of app.exit() because app.exit() skips the will-quit event.
 function safeExit(code = 0) {
     teardownMacOSScreenshotIntercept();
+    stopLinuxSuperKeyBlocker();
     globalShortcut.unregisterAll();
     app.exit(code);
 }
@@ -1225,6 +1413,7 @@ function safeExit(code = 0) {
 app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     teardownMacOSScreenshotIntercept();
+    stopLinuxSuperKeyBlocker();
 });
 
 // Quit when all windows are closed - force quit completely
@@ -1347,6 +1536,9 @@ app.whenReady().then(() => {
     // Restore screenshot defaults if a previous run crashed without cleaning up.
     recoverScreenshotSettingsIfNeeded();
 
+    // Linux: restore Super key settings if a previous run crashed without cleaning up.
+    recoverLinuxSuperKeyIfNeeded();
+
     // Check for deep link URL in command line arguments (Windows initial launch)
     console.log('🔍 Checking process.argv for deep link URL...');
     console.log('🔍 process.argv:', process.argv);
@@ -1381,6 +1573,11 @@ app.whenReady().then(() => {
     
     // Setup display monitoring
     setupDisplayMonitoring();
+
+    // Linux: disable Super key at the DE/X11 level so students cannot open the app launcher
+    if (process.platform === 'linux') {
+        startLinuxSuperKeyBlocker();
+    }
 
     // Register global shortcuts to block key combinations.
     // Linux intentionally avoids these until sharing is enabled.
