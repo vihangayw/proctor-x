@@ -25,7 +25,7 @@ let currentExamData = {
 };
 
 const CONFIG = {
-    BASE_API_URL: 'https://php.metropolitancollegeedu.com/lms-mc',
+    BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
     EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
