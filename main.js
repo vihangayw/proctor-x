@@ -14,7 +14,7 @@ const {
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
-const {spawnSync} = require('child_process');
+const {spawnSync, spawn} = require('child_process');
 const remoteMain = require('@electron/remote/main');
 const { globalShortcut } = require('electron');
 
@@ -1236,12 +1236,21 @@ function stopLinuxSuperKeyBlocker() {
         const {de, x11} = backup;
 
         if (de === 'gnome') {
-            spawnSync('gsettings', ['set', 'org.gnome.mutter', 'overlay-key', backup.gnomeOverlayKey ?? "'Super_L'"], {encoding: 'utf8'});
+            spawnSync('gsettings', ['set', 'org.gnome.mutter', 'overlay-key', backup.gnomeOverlayKey ?? "'Super_L'"], {
+                encoding: 'utf8',
+                timeout: 3000
+            });
             if (backup.gnomeToggleOverview != null) {
-                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-overview', backup.gnomeToggleOverview], {encoding: 'utf8'});
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-overview', backup.gnomeToggleOverview], {
+                    encoding: 'utf8',
+                    timeout: 3000
+                });
             }
             if (backup.gnomeToggleAppGrid != null) {
-                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-application-view', backup.gnomeToggleAppGrid], {encoding: 'utf8'});
+                spawnSync('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-application-view', backup.gnomeToggleAppGrid], {
+                    encoding: 'utf8',
+                    timeout: 3000
+                });
             }
             console.log('[SuperKeyBlocker] GNOME: overlay-key restored');
         }
@@ -1250,14 +1259,20 @@ function stopLinuxSuperKeyBlocker() {
             const kwrite = backup.kwrite || 'kwriteconfig5';
             const qdbus = backup.qdbus || 'qdbus';
             const meta = backup.kdeMeta || 'org.kde.plasmashell,/PlasmaShell,org.kde.PlasmaShell,activateLauncherMenu';
-            spawnSync(kwrite, ['--file', 'kwinrc', '--group', 'ModifierOnlyShortcuts', '--key', 'Meta', meta], {encoding: 'utf8'});
-            spawnSync(qdbus, ['org.kde.KWin', '/KWin', 'reconfigure'], {encoding: 'utf8'});
+            spawnSync(kwrite, ['--file', 'kwinrc', '--group', 'ModifierOnlyShortcuts', '--key', 'Meta', meta], {
+                encoding: 'utf8',
+                timeout: 3000
+            });
+            spawnSync(qdbus, ['org.kde.KWin', '/KWin', 'reconfigure'], {encoding: 'utf8', timeout: 3000});
             console.log('[SuperKeyBlocker] KDE: Meta key restored');
         }
 
         if (de === 'xfce' && Array.isArray(backup.xfceBindings)) {
             for (const {path: p, value} of backup.xfceBindings) {
-                spawnSync('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p, '-s', value], {encoding: 'utf8'});
+                spawnSync('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p, '-s', value], {
+                    encoding: 'utf8',
+                    timeout: 3000
+                });
             }
             console.log('[SuperKeyBlocker] XFCE: Super bindings restored');
         }
@@ -1265,8 +1280,8 @@ function stopLinuxSuperKeyBlocker() {
         if (x11 && backup.xmodmapPath) {
             try {
                 if (fs.existsSync(backup.xmodmapPath)) {
-                    spawnSync('xmodmap', [backup.xmodmapPath], {encoding: 'utf8'});
-                    spawnSync('xmodmap', ['-e', 'add mod4 = Super_L Super_R'], {encoding: 'utf8'});
+                    spawnSync('xmodmap', [backup.xmodmapPath], {encoding: 'utf8', timeout: 3000});
+                    spawnSync('xmodmap', ['-e', 'add mod4 = Super_L Super_R'], {encoding: 'utf8', timeout: 3000});
                     fs.unlinkSync(backup.xmodmapPath);
                     console.log('[SuperKeyBlocker] X11: xmodmap restored');
                 }
@@ -1276,6 +1291,77 @@ function stopLinuxSuperKeyBlocker() {
         }
     } catch (e) {
         console.error('[SuperKeyBlocker] stop failed:', e.message);
+    }
+    try {
+        fs.unlinkSync(LINUX_SUPER_KEY_RECOVERY_FILE);
+    } catch {
+    }
+    _linuxSuperKeyBackup = null;
+    console.log('[SuperKeyBlocker] Linux Super key unblocked');
+}
+
+async function stopLinuxSuperKeyBlockerAsync(maxMs = 4000) {
+    if (process.platform !== 'linux') return;
+    const backup = _linuxSuperKeyBackup || (() => {
+        try {
+            return JSON.parse(fs.readFileSync(LINUX_SUPER_KEY_RECOVERY_FILE, 'utf8'));
+        } catch {
+            return null;
+        }
+    })();
+    if (!backup) return;
+
+    const {de, x11} = backup;
+    const run = (cmd, args) => new Promise((resolve) => {
+        try {
+            const p = spawn(cmd, args, {env: process.env});
+            p.on('exit', resolve);
+            p.on('error', resolve);
+        } catch {
+            resolve();
+        }
+    });
+
+    const procs = [];
+
+    if (de === 'gnome') {
+        procs.push(run('gsettings', ['set', 'org.gnome.mutter', 'overlay-key', backup.gnomeOverlayKey ?? "'Super_L'"]));
+        if (backup.gnomeToggleOverview != null)
+            procs.push(run('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-overview', backup.gnomeToggleOverview]));
+        if (backup.gnomeToggleAppGrid != null)
+            procs.push(run('gsettings', ['set', 'org.gnome.shell.keybindings', 'toggle-application-view', backup.gnomeToggleAppGrid]));
+    }
+
+    if (de === 'kde') {
+        const kwrite = backup.kwrite || 'kwriteconfig5';
+        const qdbus = backup.qdbus || 'qdbus';
+        const meta = backup.kdeMeta || 'org.kde.plasmashell,/PlasmaShell,org.kde.PlasmaShell,activateLauncherMenu';
+        procs.push(run(kwrite, ['--file', 'kwinrc', '--group', 'ModifierOnlyShortcuts', '--key', 'Meta', meta]));
+        procs.push(run(qdbus, ['org.kde.KWin', '/KWin', 'reconfigure']));
+    }
+
+    if (de === 'xfce' && Array.isArray(backup.xfceBindings)) {
+        for (const {path: p, value} of backup.xfceBindings)
+            procs.push(run('xfconf-query', ['-c', 'xfce4-keyboard-shortcuts', '-p', p, '-s', value]));
+    }
+
+    if (x11 && backup.xmodmapPath && fs.existsSync(backup.xmodmapPath)) {
+        procs.push(
+            run('xmodmap', [backup.xmodmapPath])
+                .then(() => run('xmodmap', ['-e', 'add mod4 = Super_L Super_R']))
+        );
+    }
+
+    await Promise.race([
+        Promise.all(procs),
+        new Promise(resolve => setTimeout(resolve, maxMs))
+    ]);
+
+    if (x11 && backup.xmodmapPath) {
+        try {
+            fs.unlinkSync(backup.xmodmapPath);
+        } catch {
+        }
     }
     try {
         fs.unlinkSync(LINUX_SUPER_KEY_RECOVERY_FILE);
@@ -1400,11 +1486,11 @@ function teardownMacOSScreenshotIntercept() {
     console.log('macOS screenshot intercept removed');
 }
 
-// Safe exit: always tear down screenshot intercept and shortcuts before exiting.
-// Must be used instead of app.exit() because app.exit() skips the will-quit event.
-function safeExit(code = 0) {
+// Safe exit: tears down screenshot intercept and Super key blocker before exiting.
+// Uses the async blocker so quit is bounded to ~4 seconds even on slow machines.
+async function safeExit(code = 0) {
     teardownMacOSScreenshotIntercept();
-    stopLinuxSuperKeyBlocker();
+    await stopLinuxSuperKeyBlockerAsync(4000);
     globalShortcut.unregisterAll();
     app.exit(code);
 }
@@ -1417,8 +1503,8 @@ app.on('will-quit', () => {
 });
 
 // Quit when all windows are closed - force quit completely
-app.on('window-all-closed', () => {
-    safeExit(0);
+app.on('window-all-closed', async () => {
+    await safeExit(0);
 })
 ipcMain.handle('show-dialog', async (_, options) => {
     const result = await dialog.showMessageBox({
@@ -1433,29 +1519,19 @@ ipcMain.handle('show-dialog', async (_, options) => {
 })
 
 // Force quit — bypasses the window close event (used from permission overlay)
-ipcMain.on('force-quit-app', () => {
+ipcMain.on('force-quit-app', async () => {
     console.log('Force quit command received');
-    safeExit(0);
+    await safeExit(0);
 });
 
 ipcMain.on('quit-app', () => {
-    console.log('Quit command received') // Debug log
-    try {
-        // Send message to renderer to log exit audit before quitting
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('send-exit-audit-log');
-            // Give a small delay for audit log to be sent
-            setTimeout(() => {
-                app.quit();
-            }, 500);
-        } else {
-            app.quit();
-        }
-    } catch (error) {
-        console.error('Failed to quit:', error)
-        app.quit();
+    console.log('Quit command received');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('send-exit-audit-log');
+        setTimeout(() => safeExit(0), 500);
+    } else {
+        safeExit(0);
     }
-
 })
 
 // Monitor display changes
@@ -1751,16 +1827,16 @@ app.whenReady().then(() => {
                     allowEscapeKey: false
                 });
 
-                const handler = (event, confirmed) => {
+                const handler = async (event, confirmed) => {
                     ipcMain.removeListener('sweetalert-confirm-response', handler);
                     if (confirmed) {
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('send-exit-audit-log');
-                            setTimeout(() => {
-                                safeExit(0);
+                            setTimeout(async () => {
+                                await safeExit(0);
                             }, 500);
                         } else {
-                            safeExit(0);
+                            await safeExit(0);
                         }
                     }
                 };
