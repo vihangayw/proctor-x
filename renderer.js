@@ -24,22 +24,22 @@ let currentExamData = {
     qr: null
 };
 
-const CONFIG = {
-    BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
-    EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
-    BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
-    KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
-    BASE_LANDING: './landing.html',
-    GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
-};
 // const CONFIG = {
-//     BASE_API_URL: 'https://mcp.metropolitancollegeedu.com/lms-mc',
+//     BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
 //     EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
-//     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/testing',
+//     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
 //     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
 //     BASE_LANDING: './landing.html',
 //     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
 // };
+const CONFIG = {
+    BASE_API_URL: 'https://mcp.metropolitancollegeedu.com/lms-mc',
+    EXAM_BASE_URL: 'https://ems.metropolitancollegeedu.com/lms-exam',
+    BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/testing',
+    KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
+    BASE_LANDING: './landing.html',
+    GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
+};
 // const CONFIG = {
 //     BASE_API_URL: 'http://localhost:8383/api/v1',
 //     EXAM_BASE_URL: 'http://localhost:8384/api/v1',
@@ -1747,6 +1747,15 @@ window.electronAPI.onLaunchData(async (data) => {
     // Re-apply Tab key blocking when iframe loads new content
     iframe.addEventListener('load', () => {
         handleLoad();
+        // Sync exam mode on each iframe load — Windows may miss main-process navigation events
+        try {
+            const url = iframe.contentWindow?.location?.href || iframe.src || '';
+            console.log('[iframe load] URL:', url);
+            const active = url.includes('56565f34-9e79-4f6e-972e-0aefbfcc111e') ||
+                /\/(e-upload|r-upload)\/(?!timeout)/.test(url);
+            window.electronAPI.setExamMode(active);
+        } catch (_) {
+        }
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
             if (iframeDoc) {
@@ -1822,6 +1831,24 @@ window.electronAPI.onLaunchData(async (data) => {
     };
 
     iframe.src = examUrl;
+
+    // Windows polling fallback: SPA navigation inside the LMS doesn't always fire a
+    // load event, so the main-process navigation events may never clear isExamMode.
+    // Poll the iframe URL and push the correct state ourselves every 3 seconds.
+    let _examModePoller = setInterval(() => {
+        try {
+            const url = iframe.contentWindow?.location?.href || iframe.src || '';
+            console.log('[examModePoller] iframe URL:', url);
+            const active = url.includes('56565f34-9e79-4f6e-972e-0aefbfcc111e') ||
+                /\/(e-upload|r-upload)\/(?!timeout)/.test(url);
+            window.electronAPI.setExamMode(active);
+            if (!active) {
+                clearInterval(_examModePoller);
+                _examModePoller = null;
+            }
+        } catch (_) {
+        }
+    }, 3000);
 
     // Send audit log when exam opens
     sendAuditLog('Exam opened from ProctorX URL');
@@ -1957,12 +1984,17 @@ const uploadScreenCapture = async (sqid) => {
         console.log('⚠️ Could not access iframe internal location (likely CORS):', e.message);
     }
 
-    // console.log('🔗 Current iframe URL (checked):', currentUrl);
+    console.log('🔗 Current iframe URL (checked):', currentUrl);
 
     const allowedPhrases = [
-        '/e-quiz/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
-        '/e-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/',
-         '/r-pdf/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
+        '/exam-preview/',
+        '/resit-preview/',
+        '/e-quiz/',
+        '/e-pdf/',
+        '/r-pdf/',
+        '/e-upload/',
+        '/r-upload/',
+        '/56565f34-9e79-4f6e-972e-0aefbfcc111e/'
     ];
 
     const shouldUpload = allowedPhrases.some(phrase => currentUrl.includes(phrase));

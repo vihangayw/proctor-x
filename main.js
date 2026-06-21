@@ -235,7 +235,7 @@ const examFrameIds = new Set(); // routing IDs of frames currently on an exam UR
 
 const EXAM_URL_PATTERNS = [
     /56565f34-9e79-4f6e-972e-0aefbfcc111e/,
-    /\/(e-upload|r-upload)\//,
+    /\/(e-upload|r-upload)\/(?!timeout)/,
 ];
 
 function checkIsExamUrl(url) {
@@ -1409,7 +1409,7 @@ app.whenReady().then(() => {
                 console.log('Exit blocked: exam mode active');
                 if (mainWindow && !mainWindow.isDestroyed()) {
                     mainWindow.webContents.send('show-sweetalert-dialog', {
-                        title: 'Exit Disabled During Exam',
+                        title: 'Close Disabled During Exam',
                         text: 'You cannot exit the application while an examination is in progress.',
                         icon: 'warning',
                         confirmButtonText: 'OK',
