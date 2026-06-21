@@ -20,6 +20,8 @@
     "mac:setup-codesign-once": "node scripts/mac-setup-codesign-once.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:mac:x64": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac --x64",
+    "dist:mac:universal": "node scripts/check-mac-codesign.js && node scripts/ensure-apple-intermediate-certs.js && node scripts/prepare-mac-keychain-for-codesign.js && electron-builder build --mac --universal",
     "dist:linux": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux",
     "dist:all": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --win --linux"
   },
