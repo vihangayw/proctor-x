@@ -229,6 +229,7 @@ function stopWindowsHelpers() {
 }
 
 let deeplinkData = null;
+let demoLaunchPending = false; // Set when proctorx://demo-exam is received before window exists
 let multipleDisplayAlertShowing = false; // Track if multiple display alert is showing
 let isExamMode = false; // Track if user is on an exam page (disables exit shortcut)
 const examFrameIds = new Set(); // routing IDs of frames currently on an exam URL
@@ -263,6 +264,26 @@ if (process.platform === 'win32') {
     if (!gotTheLock) {
         // Another instance is already running, exit this one
         app.exit(0);
+    }
+}
+
+function isDemoUrl(url) {
+    return url ? url.startsWith('proctorx://demo-exam') : false;
+}
+
+function sendDemoLaunchToRenderer() {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        if (mainWindow.webContents.isLoading()) {
+            mainWindow.webContents.once('did-finish-load', () => {
+                setTimeout(() => mainWindow.webContents.send('launch-demo'), 1000);
+            });
+        } else {
+            setTimeout(() => mainWindow.webContents.send('launch-demo'), 1000);
+        }
+    } else {
+        demoLaunchPending = true;
     }
 }
 
@@ -559,7 +580,14 @@ function createWindow() {
             }
         }, 1500); // Wait 1.5 seconds for renderer to be ready
 
-        if (deeplinkData) {
+        if (demoLaunchPending) {
+            demoLaunchPending = false;
+            console.log('Found pending demo launch, sending to renderer...');
+            setTimeout(() => {
+                mainWindow.webContents.send('launch-demo');
+                console.log('launch-demo sent from did-finish-load handler');
+            }, 1000);
+        } else if (deeplinkData) {
             console.log('Found deeplink data, sending to renderer...');
             // Add a delay to ensure renderer DOMContentLoaded and handlers are ready
             setTimeout(() => {
@@ -897,6 +925,33 @@ function createWindow() {
         else cb(false);
     });
 
+    // Strip X-Frame-Options and CSP frame-ancestors from all responses so nested iframes
+    // (e.g. a PDF viewer inside the LMS iframe) are not blocked by server-sent headers.
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+        const headers = {};
+        for (const [key, value] of Object.entries(details.responseHeaders)) {
+            const lower = key.toLowerCase();
+            if (lower === 'x-frame-options' || lower === 'content-security-policy') continue;
+            headers[key] = value;
+        }
+        callback({responseHeaders: headers});
+    });
+
+    // On Linux (kiosk mode), OS-level screen-share picker can appear behind the app.
+    // Register on Session to auto-select primary screen and bypass the picker.
+    mainWindow.webContents.session.setDisplayMediaRequestHandler(
+        async (request, callback) => {
+            try {
+                const sources = await desktopCapturer.getSources({types: ['screen']});
+                callback({video: sources[0], audio: 'loopback'});
+            } catch {
+                callback({});
+            }
+        },
+        {useSystemPicker: false}
+    );
+
+
     // Block close button — only Cmd/Ctrl+Shift+Q is allowed to exit
     mainWindow.on('close', (event) => {
         event.preventDefault();
@@ -920,6 +975,10 @@ function createWindow() {
 app.on('open-url', (event, url) => {
     event.preventDefault();
     console.log('Got URL (macOS):', url);
+    if (isDemoUrl(url)) {
+        sendDemoLaunchToRenderer();
+        return;
+    }
     const data = parseDeeplinkUrl(url);
     if (data) {
         deeplinkData = data;
@@ -991,6 +1050,10 @@ app.on('second-instance', (event, argv) => {
     const url = argv.find((arg) => arg.startsWith('proctorx://'));
     if (url) {
         console.log('Second instance URL (Windows):', url);
+        if (isDemoUrl(url)) {
+            sendDemoLaunchToRenderer();
+            return;
+        }
         const data = parseDeeplinkUrl(url);
         if (data) {
             deeplinkData = data;
@@ -1284,12 +1347,16 @@ app.whenReady().then(() => {
         const url = process.argv.find((arg) => arg.startsWith('proctorx://'));
         if (url) {
             console.log('✅ Found deep link URL in command line (Windows initial launch):', url);
-            const data = parseDeeplinkUrl(url);
-            if (data) {
-                deeplinkData = data;
-                console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+            if (isDemoUrl(url)) {
+                demoLaunchPending = true;
             } else {
-                console.error('❌ Failed to parse deeplink data from command line');
+                const data = parseDeeplinkUrl(url);
+                if (data) {
+                    deeplinkData = data;
+                    console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+                } else {
+                    console.error('❌ Failed to parse deeplink data from command line');
+                }
             }
         } else {
             console.log('ℹ️ No deep link URL found in process.argv');
@@ -1299,10 +1366,14 @@ app.whenReady().then(() => {
         const url = process.argv.find((arg) => arg.startsWith('proctorx://'));
         if (url) {
             console.log('✅ Found deep link URL in command line:', url);
-            const data = parseDeeplinkUrl(url);
-            if (data) {
-                deeplinkData = data;
-                console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+            if (isDemoUrl(url)) {
+                demoLaunchPending = true;
+            } else {
+                const data = parseDeeplinkUrl(url);
+                if (data) {
+                    deeplinkData = data;
+                    console.log('✅ Parsed deeplink data from command line:', deeplinkData);
+                }
             }
         }
     }
