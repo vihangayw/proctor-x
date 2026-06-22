@@ -1912,6 +1912,16 @@ window.electronAPI.onLaunchData(async (data) => {
 });
 
 
+// === Demo Exam Launch ===
+// Triggered by proctorx://demo-exam — loads the preview page with no API calls or screen capture.
+window.electronAPI.onLaunchDemo(() => {
+    console.info('🎓 onLaunchDemo received — loading demo exam');
+    const iframe = document.getElementById('lmsFrame');
+    const errorMessage = document.getElementById('lmsError');
+    if (errorMessage) errorMessage.style.display = 'none';
+    iframe.src = CONFIG.BASE_LMS_URL + '/mcq-preview-demo';
+});
+
 const getStudentInfo = async (spid, tkn, quizId, examInfo, sqid) => {
     try {
         const response = await fetch(`${CONFIG.BASE_API_URL}/vle/student/get-login/${spid}`, {

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showWarningDialog: (options) => ipcRenderer.send('show-warning-dialog', options),
     // onQuizData: (callback) => ipcRenderer.on('quiz-data', (event, data) => callback(data)),
   onLaunchData: (callback) => ipcRenderer.on('launch-data', (event, data) => callback(data)),
+  onLaunchDemo: (callback) => ipcRenderer.on('launch-demo', () => callback()),
     onTestMessage: (callback) => ipcRenderer.on('test-message', (event, data) => callback(data)),
   onLmsConnectionError: (callback) => ipcRenderer.on('lms-connection-error', (event, data) => callback(data)),
   onShowWarningDialog: (callback) => ipcRenderer.on('show-warning-dialog', (event, data) => callback(data)),
