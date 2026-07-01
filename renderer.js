@@ -24,30 +24,33 @@ let currentExamData = {
     qr: null
 };
 
-const CONFIG = {
-    BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
-    EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
-    BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
-    KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
-    BASE_LANDING: './landing.html',
-    GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
-};
+// const CONFIG = {
+//     BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
+//     EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
+//     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
+//     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
+//     BASE_LANDING: './landing.html',
+//     PROFILE: 'live',
+//     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
+// };
 // const CONFIG = {
 //     BASE_API_URL: 'https://mcp.metropolitancollegeedu.com/lms-mc',
 //     EXAM_BASE_URL: 'https://ems.metropolitancollegeedu.com/lms-exam',
 //     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/testing',
 //     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
 //     BASE_LANDING: './landing.html',
+//     PROFILE: 'testing',
 //     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
 // };
-// const CONFIG = {
-//     BASE_API_URL: 'http://localhost:8383/api/v1',
-//     EXAM_BASE_URL: 'http://localhost:8384/api/v1',
-//     BASE_LMS_URL: 'http://localhost:3001/testing',
-//     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
-//     BASE_LANDING: './landing.html',
-//     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
-// };
+const CONFIG = {
+    BASE_API_URL: 'http://localhost:8383/api/v1',
+    EXAM_BASE_URL: 'http://localhost:8384/api/v1',
+    BASE_LMS_URL: 'http://localhost:3001',
+    KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
+    BASE_LANDING: './landing.html',
+    PROFILE: 'local',
+    GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
+};
 
 // LiveKit Configuration
 const LIVEKIT_CONFIG = {
@@ -1707,7 +1710,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const quizUrl = CONFIG.BASE_LANDING; // should be something like './landing.html'
     console.info('Loading:', quizUrl);
-    iframe.src = quizUrl;
+    iframe.src = quizUrl + '?profile=' + encodeURIComponent(CONFIG.PROFILE);
 
     // Check app version when landing page loads (only once)
     let versionCheckDone = false;
