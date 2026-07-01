@@ -235,25 +235,20 @@ let isExamMode = false; // Track if user is on an exam page (disables exit short
 const examFrameIds = new Set(); // routing IDs of frames currently on an exam URL
 
 const EXAM_URL_PATTERNS = [
-    /56565f34-9e79-4f6e-972e-0aefbfcc111e/,
-    /\/(e-upload|r-upload)\/(?!timeout)/,
+    'timeout',
+    'e-upload',
+    'r-upload',
+    'landing',
+    'index',
+    'demo',
 ];
 
-function checkIsExamUrl(url) {
-    return url ? EXAM_URL_PATTERNS.some((re) => re.test(url)) : false;
-}
 
 function updateExamFrame(frameRoutingId, url) {
-    if (checkIsExamUrl(url)) {
-        examFrameIds.add(frameRoutingId);
-    } else {
-        examFrameIds.delete(frameRoutingId);
-    }
-    const nowExam = examFrameIds.size > 0;
-    if (nowExam !== isExamMode) {
-        isExamMode = nowExam;
-        console.log(`Exam mode: ${isExamMode} (URL: ${url})`);
-    }
+    console.log("XXX :  " + url)
+
+    isExamMode = !EXAM_URL_PATTERNS.some(phrase => url.includes(phrase));
+    console.log(`Exam mode: ${isExamMode} (URL: ${url})`);
 }
 
 remoteMain.initialize();

@@ -24,28 +24,28 @@ let currentExamData = {
     qr: null
 };
 
+// const CONFIG = {
+//     BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
+//     EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
+//     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
+//     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
+//     BASE_LANDING: './landing.html',
+//     PROFILE: 'live',
+//     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
+// };
 const CONFIG = {
-    BASE_API_URL: 'https://sms.metropolitancollegeedu.com/lms-mc',
-    EXAM_BASE_URL: 'https://exams.metropolitancollege.lk/lms-exam',
-    BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/lms-mc',
+    BASE_API_URL: 'https://mcp.metropolitancollegeedu.com/lms-mc',
+    EXAM_BASE_URL: 'https://ems.metropolitancollegeedu.com/lms-exam',
+    BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/testing',
     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
     BASE_LANDING: './landing.html',
-    PROFILE: 'live',
+    PROFILE: 'testing',
     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
 };
 // const CONFIG = {
-//     BASE_API_URL: 'https://mcp.metropolitancollegeedu.com/lms-mc',
-//     EXAM_BASE_URL: 'https://ems.metropolitancollegeedu.com/lms-exam',
-//     BASE_LMS_URL: 'https://www.metropolitancollegeedu.com/testing',
-//     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
-//     BASE_LANDING: './landing.html',
-//     PROFILE: 'testing',
-//     GEN_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJWTEUiLCJuYW1lIjoiTE1TLU1DIiwiaWF0IjoxNjkxMzA2MDEwLCJhdXRob3IiOiJ2aWhhbmdhd2lja3MiLCJleHAiOjE5OTEzMDYwMTAsImlzcyI6Im1jOnZ5dzpqTWlGaWV6cjMxMyIsIm5iZiI6MTY5MTIwNTAwMH0.EAPlpsX1ZuoK5R_u4818-d4zJAIeXgXUKGqHu2x7SQM'
-// };
-// const CONFIG = {
 //     BASE_API_URL: 'http://localhost:8383/api/v1',
 //     EXAM_BASE_URL: 'http://localhost:8384/api/v1',
-//     BASE_LMS_URL: 'http://localhost:3001/testing',
+//     BASE_LMS_URL: 'http://localhost:3001',
 //     KURENTO: 'wss://localhost:8443/kurento-group-call/groupcall',
 //     BASE_LANDING: './landing.html',
 //     PROFILE: 'local',
@@ -1716,8 +1716,8 @@ window.electronAPI.onLaunchData(async (data) => {
     const normalizedPdfMcq = pdf_mcq ? String(pdf_mcq).trim().toLowerCase() : 'pdf';
     // For MCQ mode, append '/mcq' so the LMS route /:pdf_mcq param is set; PDF keeps existing behaviour
     const examUrl = normalizedPdfMcq === 'mcq'
-        ? `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/mcq`
-        : `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/pdf`;
+        ? `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/mcq?v=${Date.now()}`
+        : `${CONFIG.BASE_LMS_URL}/${previewPath}/${quizId}/${tkn}/${studentId}/${sqid}/pdf?v=${Date.now()}`;
     console.log('🌐 Loading exam URL:', examUrl, '(mode:', normalizedPdfMcq, ')');
 
     // Set up error handling for iframe
@@ -1887,7 +1887,7 @@ window.electronAPI.onLaunchDemo(() => {
     const iframe = document.getElementById('lmsFrame');
     const errorMessage = document.getElementById('lmsError');
     if (errorMessage) errorMessage.style.display = 'none';
-    iframe.src = CONFIG.BASE_LMS_URL + '/mcq-preview-demo';
+    iframe.src = CONFIG.BASE_LMS_URL + '/mcq-preview-demo?v=' + Date.now();
 });
 
 const getStudentInfo = async (spid, tkn, quizId, examInfo, sqid) => {
