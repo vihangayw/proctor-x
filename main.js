@@ -241,6 +241,7 @@ const EXAM_URL_PATTERNS = [
     'landing',
     'index',
     'demo',
+    'preview'
 ];
 
 
