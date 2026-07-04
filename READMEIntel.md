@@ -25,13 +25,13 @@ npm run dist:mac:x64
 This does two things:
 
 - builds and notarizes `dist/mac/Proctor-X.app`
-- creates `dist/Proctor-X-1.0.2.dmg` using the custom mount-and-copy DMG builder
+- creates `dist/Proctor-X-1.0.3.dmg` using the custom mount-and-copy DMG builder
 
 This generates:
 
 ```text
 dist/
- ├── Proctor-X-1.0.2.dmg
+ ├── Proctor-X-1.0.3.dmg
  └── mac/Proctor-X.app
 ```
 
@@ -112,7 +112,7 @@ open dist/Proctor-X-*.dmg
 Then verify the app inside:
 
 ```sh
-spctl -a -vv "/Volumes/Proctor-X 1.0.2/Proctor-X.app"
+spctl -a -vv "/Volumes/Proctor-X 1.0.3/Proctor-X.app"
 ```
 
 Expected:
@@ -127,5 +127,5 @@ source=Notarized Developer ID
 - The app is configured with `afterSign` notarization support in `scripts/notarize.js`.
 - The DMG is created by `scripts/build-mac-dmg.js`, not by `electron-builder`'s built-in DMG target.
 - `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_APP_PASSWORD` are currently set to the same value.
-- The mounted DMG volume name in this project is `Proctor-X 1.0.2`, so the verification path should match that
+- The mounted DMG volume name in this project is `Proctor-X 1.0.3`, so the verification path should match that
   exact volume name.
